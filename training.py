@@ -4,7 +4,6 @@
 import gc
 import math
 import os
-import random
 import re
 import time
 import warnings
@@ -29,6 +28,7 @@ from transformers import (
 )
 from src.meter import AverageMeter
 from src.logger import get_logger
+from src.utils import seed_everything
 
 warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
@@ -41,11 +41,14 @@ if not os.path.exists(CFG["output_dir"]):
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-LOGGER = get_logger()
+seed_everything(seed=CFG["seed"])
+
+LOGGER = get_logger(CFG["output_dir"] + "train")
 
 train = pd.read_csv(CFG["input_dir"] + "train.csv")
 test = pd.read_csv(CFG["input_dir"] + "test.csv")
 submission = pd.read_csv(CFG["input_dir"] + "sample_submission.csv")
+
 
 # ====================================================
 # Utils
@@ -53,18 +56,6 @@ submission = pd.read_csv(CFG["input_dir"] + "sample_submission.csv")
 def get_score(y_true, y_pred):
     score = sp.stats.pearsonr(y_true, y_pred)[0]
     return score
-
-
-def seed_everything(seed=42):
-    random.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-
-
-seed_everything(seed=42)
 
 
 def get_cpc_texts():

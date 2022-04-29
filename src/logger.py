@@ -1,4 +1,4 @@
-def get_logger(filename=CFG["output_dir"] + "train"):
+def get_logger(filename="train"):
     from logging import INFO, FileHandler, Formatter, StreamHandler, getLogger
 
     logger = getLogger(__name__)
