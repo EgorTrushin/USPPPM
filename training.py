@@ -10,14 +10,12 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import yaml
-from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
-from sklearn.model_selection import StratifiedKFold
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 from src.logger import get_logger
-from src.utils import seed_everything, get_cpc_texts, get_score, get_result
+from src.utils import seed_everything, get_cpc_texts, get_score, get_result, get_folds
 from src.data import TrainDataset
 from src.model import CustomModel
 from src.train import train_fn
@@ -39,42 +37,20 @@ seed_everything(seed=CFG["seed"])
 LOGGER = get_logger(CFG["output_dir"] + "train")
 
 train = pd.read_csv(CFG["input_dir"] + "train.csv")
-test = pd.read_csv(CFG["input_dir"] + "test.csv")
+# test = pd.read_csv(CFG["input_dir"] + "test.csv")
 submission = pd.read_csv(CFG["input_dir"] + "sample_submission.csv")
 
 cpc_texts = get_cpc_texts(CFG)
 torch.save(cpc_texts, CFG["output_dir"] + "cpc_texts.pth")
 train["context_text"] = train["context"].map(cpc_texts)
-test["context_text"] = test["context"].map(cpc_texts)
 
 train["text"] = train["anchor"] + "[SEP]" + train["target"] + "[SEP]" + train["context_text"]
-test["text"] = test["anchor"] + "[SEP]" + test["target"] + "[SEP]" + test["context_text"]
 
-
-if CFG["cv_scheme"] == 0:
-    train["score_map"] = train["score"].map({0.00: 0, 0.25: 1, 0.50: 2, 0.75: 3, 1.00: 4})
-    Fold = StratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
-    for n, (train_index, val_index) in enumerate(Fold.split(train, train["score_map"])):
-        train.loc[val_index, "fold"] = int(n)
-    train["fold"] = train["fold"].astype(int)
-else:
-    dfx = pd.get_dummies(train, columns=["score"]).groupby(["anchor"], as_index=False).sum()
-    cols = [c for c in dfx.columns if c.startswith("score_") or c == "anchor"]
-    dfx = dfx[cols]
-    mskf = MultilabelStratifiedKFold(n_splits=CFG["n_fold"], shuffle=True, random_state=42)
-    labels = [c for c in dfx.columns if c != "anchor"]
-    dfx_labels = dfx[labels]
-    dfx["fold"] = -1
-    for fold, (trn_, val_) in enumerate(mskf.split(dfx, dfx_labels)):
-        dfx.loc[val_, "fold"] = fold
-    train = train.merge(dfx[["anchor", "fold"]], on="anchor", how="left")
-
+train = get_folds(train, CFG)
 
 tokenizer = AutoTokenizer.from_pretrained(CFG["model"])
 tokenizer.save_pretrained(CFG["output_dir"] + "tokenizer/")
 CFG["tokenizer"] = tokenizer
-# tokenizer = AutoTokenizer.from_pretrained('tokenizer/')
-# CFG["tokenizer"] = tokenizer
 
 
 # ====================================================

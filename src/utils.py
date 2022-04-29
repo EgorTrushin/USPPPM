@@ -2,10 +2,34 @@ import random
 import scipy
 import os
 import numpy as np
+import pandas as pd
 import torch
 import re
 import math
 import time
+from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+from sklearn.model_selection import StratifiedKFold
+
+
+def get_folds(train, CFG):
+    if CFG["cv_scheme"] == 0:
+        train["score_map"] = train["score"].map({0.00: 0, 0.25: 1, 0.50: 2, 0.75: 3, 1.00: 4})
+        Fold = StratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG["fold_seed"])
+        for n, (train_index, val_index) in enumerate(Fold.split(train, train["score_map"])):
+            train.loc[val_index, "fold"] = int(n)
+        train["fold"] = train["fold"].astype(int)
+    else:
+        dfx = pd.get_dummies(train, columns=["score"]).groupby(["anchor"], as_index=False).sum()
+        cols = [c for c in dfx.columns if c.startswith("score_") or c == "anchor"]
+        dfx = dfx[cols]
+        mskf = MultilabelStratifiedKFold(n_splits=CFG["n_fold"], shuffle=True, random_state=CFG["fold_seed"])
+        labels = [c for c in dfx.columns if c != "anchor"]
+        dfx_labels = dfx[labels]
+        dfx["fold"] = -1
+        for fold, (trn_, val_) in enumerate(mskf.split(dfx, dfx_labels)):
+            dfx.loc[val_, "fold"] = fold
+        train = train.merge(dfx[["anchor", "fold"]], on="anchor", how="left")
+    return train
 
 
 def seed_everything(seed=42):

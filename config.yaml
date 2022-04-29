@@ -23,5 +23,6 @@ gradient_accumulation_steps: 1
 max_grad_norm: 1000
 seed: 42
 n_fold: 5
+fold_seed: 42
 trn_fold: [0, 1, 2, 3, 4]
 cv_scheme: 1
