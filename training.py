@@ -10,7 +10,6 @@ import warnings
 
 import numpy as np
 import pandas as pd
-import scipy as sp
 import torch
 import torch.nn as nn
 import yaml
@@ -28,7 +27,7 @@ from transformers import (
 )
 from src.meter import AverageMeter
 from src.logger import get_logger
-from src.utils import seed_everything
+from src.utils import seed_everything, get_cpc_texts, get_score, timeSince
 
 warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
@@ -49,38 +48,7 @@ train = pd.read_csv(CFG["input_dir"] + "train.csv")
 test = pd.read_csv(CFG["input_dir"] + "test.csv")
 submission = pd.read_csv(CFG["input_dir"] + "sample_submission.csv")
 
-
-# ====================================================
-# Utils
-# ====================================================
-def get_score(y_true, y_pred):
-    score = sp.stats.pearsonr(y_true, y_pred)[0]
-    return score
-
-
-def get_cpc_texts():
-    contexts = []
-    pattern = "[A-Z]\d+"
-    for file_name in os.listdir(CFG["input_dir"] + "cpc-data/CPCSchemeXML202105"):
-        result = re.findall(pattern, file_name)
-        if result:
-            contexts.append(result)
-    contexts = sorted(set(sum(contexts, [])))
-    results = {}
-    for cpc in ["A", "B", "C", "D", "E", "F", "G", "H", "Y"]:
-        with open(CFG["input_dir"] + f"cpc-data/CPCTitleList202202/cpc-section-{cpc}_20220201.txt") as f:
-            s = f.read()
-        pattern = f"{cpc}\t\t.+"
-        result = re.findall(pattern, s)
-        cpc_result = result[0].lstrip(pattern)
-        for context in [c for c in contexts if c[0] == cpc]:
-            pattern = f"{context}\t\t.+"
-            result = re.findall(pattern, s)
-            results[context] = cpc_result + ". " + result[0].lstrip(pattern)
-    return results
-
-
-cpc_texts = get_cpc_texts()
+cpc_texts = get_cpc_texts(CFG)
 torch.save(cpc_texts, CFG["output_dir"] + "cpc_texts.pth")
 train["context_text"] = train["context"].map(cpc_texts)
 test["context_text"] = test["context"].map(cpc_texts)
@@ -111,10 +79,6 @@ for fold, (trn_, val_) in enumerate(mskf.split(dfx, dfx_labels)):
 
 train = train.merge(dfx[["anchor", "fold"]], on="anchor", how="left")
 
-
-# ====================================================
-# tokenizer
-# ====================================================
 tokenizer = AutoTokenizer.from_pretrained(CFG["model"])
 tokenizer.save_pretrained(CFG["output_dir"] + "tokenizer/")
 CFG["tokenizer"] = tokenizer
@@ -128,7 +92,7 @@ CFG["tokenizer"] = tokenizer
 lengths_dict = {}
 
 lengths = []
-tk0 = tqdm(cpc_texts.values(), total=len(cpc_texts))
+tk0 = tqdm(cpc_texts.values(), total=len(cpc_texts), disable=True)
 for text in tk0:
     length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
     lengths.append(length)
@@ -136,7 +100,7 @@ lengths_dict["context_text"] = lengths
 
 for text_col in ["anchor", "target"]:
     lengths = []
-    tk0 = tqdm(train[text_col].fillna("").values, total=len(train))
+    tk0 = tqdm(train[text_col].fillna("").values, total=len(train), disable=True)
     for text in tk0:
         length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
         lengths.append(length)
@@ -224,20 +188,6 @@ class CustomModel(nn.Module):
         feature = self.feature(inputs)
         output = self.fc(self.fc_dropout(feature))
         return output
-
-
-def asMinutes(s):
-    m = math.floor(s / 60)
-    s -= m * 60
-    return "%dm %ds" % (m, s)
-
-
-def timeSince(since, percent):
-    now = time.time()
-    s = now - since
-    es = s / (percent)
-    rs = es - s
-    return "%s (remain %s)" % (asMinutes(s), asMinutes(rs))
 
 
 def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device):
@@ -432,13 +382,9 @@ def train_loop(folds, fold):
 
         start_time = time.time()
 
-        # train
         avg_loss = train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device)
-
-        # eval
         avg_val_loss, predictions = valid_fn(valid_loader, model, criterion, device)
 
-        # scoring
         score = get_score(valid_labels, predictions)
 
         elapsed = time.time() - start_time
