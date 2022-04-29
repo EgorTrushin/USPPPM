@@ -1,7 +1,35 @@
 #!/usr/bin/env python3
+"""Training script for U.S. Patent Phrase to Phrase Matching."""
 
+import gc
+import math
 import os
+import random
+import re
+import sys
+import time
+import warnings
+
+import numpy as np
+import pandas as pd
+import scipy as sp
+import torch
+import torch.nn as nn
 import yaml
+from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+from sklearn.model_selection import StratifiedKFold
+from torch.optim import AdamW
+from torch.utils.data import DataLoader, Dataset
+from tqdm.auto import tqdm
+from transformers import (
+    AutoConfig,
+    AutoModel,
+    AutoTokenizer,
+    get_cosine_schedule_with_warmup,
+    get_linear_schedule_with_warmup,
+)
+
+warnings.filterwarnings("ignore")
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
@@ -11,49 +39,8 @@ with open("config.yaml", "r") as file_obj:
 if not os.path.exists(CFG["output_dir"]):
     os.makedirs(CFG["output_dir"])
 
-
-# ====================================================
-# Library
-# ====================================================
-import gc
-import re
-import ast
-import sys
-import copy
-import json
-import time
-import math
-import shutil
-import string
-import pickle
-import random
-import joblib
-import itertools
-from pathlib import Path
-import warnings
-
-warnings.filterwarnings("ignore")
-
-import scipy as sp
-import numpy as np
-import pandas as pd
-from tqdm.auto import tqdm
-from sklearn.metrics import f1_score
-from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
-
-import torch
-import torch.nn as nn
-from torch.nn import Parameter
-import torch.nn.functional as F
-from torch.optim import Adam, SGD, AdamW
-from torch.utils.data import DataLoader, Dataset
-
-import tokenizers
-import transformers
-from transformers import AutoTokenizer, AutoModel, AutoConfig
-from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 # ====================================================
 # Utils
@@ -64,7 +51,7 @@ def get_score(y_true, y_pred):
 
 
 def get_logger(filename=CFG["output_dir"] + "train"):
-    from logging import getLogger, INFO, StreamHandler, FileHandler, Formatter
+    from logging import INFO, FileHandler, Formatter, StreamHandler, getLogger
 
     logger = getLogger(__name__)
     logger.setLevel(INFO)
@@ -131,6 +118,7 @@ test["context_text"] = test["context"].map(cpc_texts)
 train["text"] = train["anchor"] + "[SEP]" + train["target"] + "[SEP]" + train["context_text"]
 test["text"] = test["anchor"] + "[SEP]" + test["target"] + "[SEP]" + test["context_text"]
 
+
 # ====================================================
 # CV split
 # ====================================================
@@ -139,8 +127,6 @@ test["text"] = test["anchor"] + "[SEP]" + test["target"] + "[SEP]" + test["conte
 # for n, (train_index, val_index) in enumerate(Fold.split(train, train['score_map'])):
 #    train.loc[val_index, 'fold'] = int(n)
 # train['fold'] = train['fold'].astype(int)
-from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
-
 dfx = pd.get_dummies(train, columns=["score"]).groupby(["anchor"], as_index=False).sum()
 cols = [c for c in dfx.columns if c.startswith("score_") or c == "anchor"]
 dfx = dfx[cols]
@@ -151,7 +137,6 @@ dfx_labels = dfx[labels]
 dfx["fold"] = -1
 
 for fold, (trn_, val_) in enumerate(mskf.split(dfx, dfx_labels)):
-    print(len(trn_), len(val_))
     dfx.loc[val_, "fold"] = fold
 
 train = train.merge(dfx[["anchor", "fold"]], on="anchor", how="left")
@@ -191,7 +176,8 @@ CFG["max_len"] = (
     max(lengths_dict["anchor"]) + max(lengths_dict["target"]) + max(lengths_dict["context_text"]) + 4
 )  # CLS + SEP + SEP + SEP
 max_len = CFG["max_len"]
-LOGGER.info("max_len: {max_len}")
+LOGGER.info(f"max_len: {max_len}")
+
 
 # ====================================================
 # Dataset
@@ -310,7 +296,7 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
     model.train()
     scaler = torch.cuda.amp.GradScaler(enabled=CFG["apex"])
     losses = AverageMeter()
-    start = end = time.time()
+    start = time.time()
     global_step = 0
     for step, (inputs, labels) in enumerate(train_loader):
         for k, v in inputs.items():
@@ -332,7 +318,6 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
             global_step += 1
             if CFG["batch_scheduler"]:
                 scheduler.step()
-        end = time.time()
         if step % CFG["print_freq"] == 0 or step == (len(train_loader) - 1):
             print(
                 "Epoch: [{0}][{1}/{2}] "
@@ -357,7 +342,7 @@ def valid_fn(valid_loader, model, criterion, device):
     losses = AverageMeter()
     model.eval()
     preds = []
-    start = end = time.time()
+    start = time.time()
     for step, (inputs, labels) in enumerate(valid_loader):
         for k, v in inputs.items():
             inputs[k] = v.to(device)
@@ -366,16 +351,15 @@ def valid_fn(valid_loader, model, criterion, device):
         with torch.no_grad():
             y_preds = model(inputs)
         loss = criterion(y_preds.view(-1, 1), labels.view(-1, 1))
-        if CFG.gradient_accumulation_steps > 1:
-            loss = loss / CFG.gradient_accumulation_steps
+        if CFG["gradient_accumulation_steps"] > 1:
+            loss = loss / CFG["gradient_accumulation_steps"]
         losses.update(loss.item(), batch_size)
         preds.append(y_preds.sigmoid().to("cpu").numpy())
-        end = time.time()
-        if step % CFG.print_freq == 0 or step == (len(valid_loader) - 1):
+        if step % CFG["print_freq"] == 0 or step == (len(valid_loader) - 1):
             print(
-                "EVAL: [{0}/{1}] "
-                "Elapsed {remain:s} "
-                "Loss: {loss.val:.4f}({loss.avg:.4f}) ".format(
+                "EVAL: [{0}/{1}]"
+                "Elapsed {remain:s}"
+                "Loss: {loss.val:.4f}({loss.avg:.4f})".format(
                     step, len(valid_loader), loss=losses, remain=timeSince(start, float(step + 1) / len(valid_loader))
                 ),
                 flush=True,
@@ -442,7 +426,6 @@ def train_loop(folds, fold):
     model.to(device)
 
     def get_optimizer_params(model, encoder_lr, decoder_lr, weight_decay=0.0):
-        param_optimizer = list(model.named_parameters())
         no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
         optimizer_parameters = [
             {
@@ -553,6 +536,6 @@ if __name__ == "__main__":
                 LOGGER.info(f"========== fold: {fold} result ==========")
                 get_result(_oof_df)
         oof_df = oof_df.reset_index(drop=True)
-        LOGGER.info(f"========== CV ==========")
+        LOGGER.info("========== CV ==========")
         get_result(oof_df)
         oof_df.to_pickle(CFG["output_dir"] + "oof_df.pkl")
