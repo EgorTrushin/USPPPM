@@ -2,9 +2,7 @@
 """Training script for U.S. Patent Phrase to Phrase Matching."""
 
 import gc
-import math
 import os
-import re
 import time
 import warnings
 
@@ -27,7 +25,7 @@ from transformers import (
 )
 from src.meter import AverageMeter
 from src.logger import get_logger
-from src.utils import seed_everything, get_cpc_texts, get_score, timeSince
+from src.utils import seed_everything, get_cpc_texts, get_score, timeSince, get_result
 
 warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
@@ -415,12 +413,6 @@ def train_loop(folds, fold):
 
 if __name__ == "__main__":
 
-    def get_result(oof_df):
-        labels = oof_df["score"].values
-        preds = oof_df["pred"].values
-        score = get_score(labels, preds)
-        LOGGER.info(f"Score: {score:<.4f}")
-
     if CFG["train"]:
         oof_df = pd.DataFrame()
         for fold in range(CFG["n_fold"]):
@@ -431,5 +423,6 @@ if __name__ == "__main__":
                 get_result(_oof_df)
         oof_df = oof_df.reset_index(drop=True)
         LOGGER.info("========== CV ==========")
-        get_result(oof_df)
+        score = get_result(oof_df)
+        LOGGER.info(f"Score: {score:<.4f}")
         oof_df.to_pickle(CFG["output_dir"] + "oof_df.pkl")

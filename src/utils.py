@@ -56,3 +56,10 @@ def timeSince(since, percent):
     es = s / (percent)
     rs = es - s
     return "%s (remain %s)" % (asMinutes(s), asMinutes(rs))
+
+
+def get_result(oof_df):
+    labels = oof_df["score"].values
+    preds = oof_df["pred"].values
+    score = get_score(labels, preds)
+    return score
