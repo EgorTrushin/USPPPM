@@ -23,49 +23,11 @@ from src.valid import valid_fn
 warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
-with open("config.yaml", "r") as file_obj:
-    CFG = yaml.safe_load(file_obj)
 
-if not os.path.exists(CFG["output_dir"]):
-    os.makedirs(CFG["output_dir"])
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-seed_everything(seed=CFG["seed"])
-
-LOGGER = get_logger(CFG["output_dir"] + "train")
-
-train = pd.read_csv(CFG["input_dir"] + "train.csv")
-# test = pd.read_csv(CFG["input_dir"] + "test.csv")
-submission = pd.read_csv(CFG["input_dir"] + "sample_submission.csv")
-
-cpc_texts = get_cpc_texts(CFG)
-torch.save(cpc_texts, CFG["output_dir"] + "cpc_texts.pth")
-train["context_text"] = train["context"].map(cpc_texts)
-
-train["text"] = train["anchor"] + "[SEP]" + train["target"] + "[SEP]" + train["context_text"]
-
-train = get_folds(train, CFG)
-
-tokenizer = AutoTokenizer.from_pretrained(CFG["model"])
-tokenizer.save_pretrained(CFG["output_dir"] + "tokenizer/")
-CFG["tokenizer"] = tokenizer
-
-max_len = get_max_len(train, cpc_texts, tokenizer)
-CFG["max_len"] = max_len
-LOGGER.info(f"max_len: {max_len}")
-
-
-# ====================================================
-# train loop
-# ====================================================
 def train_loop(folds, fold):
 
-    LOGGER.info(f"========== fold: {fold} training ==========")
+    LOGGER.info(f"\n###### Fold {fold}")
 
-    # ====================================================
-    # loader
-    # ====================================================
     train_folds = folds[folds["fold"] != fold].reset_index(drop=True)
     valid_folds = folds[folds["fold"] == fold].reset_index(drop=True)
     valid_labels = valid_folds["score"].values
@@ -90,9 +52,6 @@ def train_loop(folds, fold):
         drop_last=False,
     )
 
-    # ====================================================
-    # model & optimizer
-    # ====================================================
     model = CustomModel(CFG, config_path=None, pretrained=True)
     torch.save(model.config, CFG["output_dir"] + "config.pth")
     model.to(device)
@@ -125,9 +84,6 @@ def train_loop(folds, fold):
         optimizer_parameters, lr=CFG["encoder_lr"], eps=CFG["eps"], betas=(CFG["betas"][0], CFG["betas"][1])
     )
 
-    # ====================================================
-    # scheduler
-    # ====================================================
     def get_scheduler(cfg, optimizer, num_train_steps):
         if cfg["scheduler"] == "linear":
             scheduler = get_linear_schedule_with_warmup(
@@ -145,9 +101,6 @@ def train_loop(folds, fold):
     num_train_steps = int(len(train_folds) / CFG["batch_size"] * CFG["epochs"])
     scheduler = get_scheduler(CFG, optimizer, num_train_steps)
 
-    # ====================================================
-    # loop
-    # ====================================================
     criterion = nn.BCEWithLogitsLoss(reduction="mean")
 
     best_score = 0.0
@@ -163,14 +116,12 @@ def train_loop(folds, fold):
 
         elapsed = time.time() - start_time
 
-        LOGGER.info(
-            f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  time: {elapsed:.0f}s"
-        )
+        LOGGER.info(f"Epoch {epoch+1} - train_loss: {avg_loss:.4f}  val_loss: {avg_val_loss:.4f}  time: {elapsed:.0f}s")
         LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}")
 
         if best_score < score:
             best_score = score
-            LOGGER.info(f"Epoch {epoch+1} - Save Best Score: {best_score:.4f} Model")
+            LOGGER.info(f"Epoch {epoch+1} - Save Best Score: {best_score:.4f}")
             torch.save(
                 {"model": model.state_dict(), "predictions": predictions},
                 CFG["output_dir"] + f"fold{fold}_best.pth",
@@ -188,15 +139,47 @@ def train_loop(folds, fold):
 
 
 if __name__ == "__main__":
+    with open("config.yaml", "r") as file_obj:
+        CFG = yaml.safe_load(file_obj)
+
+    if not os.path.exists(CFG["output_dir"]):
+        os.makedirs(CFG["output_dir"])
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    seed_everything(seed=CFG["seed"])
+
+    LOGGER = get_logger(CFG["output_dir"] + "train")
+
+    train = pd.read_csv(CFG["input_dir"] + "train.csv")
+    # test = pd.read_csv(CFG["input_dir"] + "test.csv")
+    submission = pd.read_csv(CFG["input_dir"] + "sample_submission.csv")
+
+    cpc_texts = get_cpc_texts(CFG)
+    torch.save(cpc_texts, CFG["output_dir"] + "cpc_texts.pth")
+    train["context_text"] = train["context"].map(cpc_texts)
+
+    train["text"] = train["anchor"] + "[SEP]" + train["target"] + "[SEP]" + train["context_text"]
+
+    train = get_folds(train, CFG)
+
+    tokenizer = AutoTokenizer.from_pretrained(CFG["model"])
+    tokenizer.save_pretrained(CFG["output_dir"] + "tokenizer/")
+    CFG["tokenizer"] = tokenizer
+
+    max_len = get_max_len(train, cpc_texts, tokenizer)
+    CFG["max_len"] = max_len
+    LOGGER.info(f"max_len: {max_len}")
+
     oof_df = pd.DataFrame()
     for fold in range(CFG["n_fold"]):
         if fold in CFG["trn_fold"]:
             _oof_df = train_loop(train, fold)
             oof_df = pd.concat([oof_df, _oof_df])
-            LOGGER.info(f"========== fold: {fold} result ==========")
+            LOGGER.info(f"#### Fold {fold} result")
             get_result(_oof_df)
     oof_df = oof_df.reset_index(drop=True)
-    LOGGER.info("========== CV ==========")
+    LOGGER.info("#### CV")
     score = get_result(oof_df)
     LOGGER.info(f"Score: {score:<.4f}")
     oof_df.to_pickle(CFG["output_dir"] + "oof_df.pkl")
