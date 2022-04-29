@@ -16,17 +16,12 @@ from sklearn.model_selection import StratifiedKFold
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-from transformers import (
-    AutoConfig,
-    AutoModel,
-    AutoTokenizer,
-    get_cosine_schedule_with_warmup,
-    get_linear_schedule_with_warmup,
-)
+from transformers import AutoTokenizer, get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 from src.meter import AverageMeter
 from src.logger import get_logger
 from src.utils import seed_everything, get_cpc_texts, get_score, timeSince, get_result
 from src.data import TrainDataset
+from src.model import CustomModel
 
 warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
@@ -110,56 +105,6 @@ CFG["max_len"] = (
 )  # CLS + SEP + SEP + SEP
 max_len = CFG["max_len"]
 LOGGER.info(f"max_len: {max_len}")
-
-
-# ====================================================
-# Model
-# ====================================================
-class CustomModel(nn.Module):
-    def __init__(self, cfg, config_path=None, pretrained=False):
-        super().__init__()
-        self.cfg = cfg
-        if config_path is None:
-            self.config = AutoConfig.from_pretrained(cfg["model"], output_hidden_states=True)
-        else:
-            self.config = torch.load(config_path)
-        if pretrained:
-            self.model = AutoModel.from_pretrained(cfg["model"], config=self.config)
-        else:
-            self.model = AutoModel.from_config(self.config)
-        self.fc_dropout = nn.Dropout(cfg["fc_dropout"])
-        self.fc = nn.Linear(self.config.hidden_size, self.cfg["target_size"])
-        self._init_weights(self.fc)
-        self.attention = nn.Sequential(
-            nn.Linear(self.config.hidden_size, 256), nn.Tanh(), nn.Linear(256, 1), nn.Softmax(dim=1)
-        )
-        self._init_weights(self.attention)
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-
-    def feature(self, inputs):
-        outputs = self.model(**inputs)
-        last_hidden_states = outputs[0]
-        # feature = torch.mean(last_hidden_states, 1)
-        weights = self.attention(last_hidden_states)
-        feature = torch.sum(weights * last_hidden_states, dim=1)
-        return feature
-
-    def forward(self, inputs):
-        feature = self.feature(inputs)
-        output = self.fc(self.fc_dropout(feature))
-        return output
 
 
 def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device):
