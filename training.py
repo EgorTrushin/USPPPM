@@ -51,27 +51,24 @@ train["text"] = train["anchor"] + "[SEP]" + train["target"] + "[SEP]" + train["c
 test["text"] = test["anchor"] + "[SEP]" + test["target"] + "[SEP]" + test["context_text"]
 
 
-# ====================================================
-# CV split
-# ====================================================
-# train['score_map'] = train['score'].map({0.00: 0, 0.25: 1, 0.50: 2, 0.75: 3, 1.00: 4})
-# Fold = StratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
-# for n, (train_index, val_index) in enumerate(Fold.split(train, train['score_map'])):
-#    train.loc[val_index, 'fold'] = int(n)
-# train['fold'] = train['fold'].astype(int)
-dfx = pd.get_dummies(train, columns=["score"]).groupby(["anchor"], as_index=False).sum()
-cols = [c for c in dfx.columns if c.startswith("score_") or c == "anchor"]
-dfx = dfx[cols]
+if CFG["cv_scheme"] == 0:
+    train["score_map"] = train["score"].map({0.00: 0, 0.25: 1, 0.50: 2, 0.75: 3, 1.00: 4})
+    Fold = StratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
+    for n, (train_index, val_index) in enumerate(Fold.split(train, train["score_map"])):
+        train.loc[val_index, "fold"] = int(n)
+    train["fold"] = train["fold"].astype(int)
+else:
+    dfx = pd.get_dummies(train, columns=["score"]).groupby(["anchor"], as_index=False).sum()
+    cols = [c for c in dfx.columns if c.startswith("score_") or c == "anchor"]
+    dfx = dfx[cols]
+    mskf = MultilabelStratifiedKFold(n_splits=CFG["n_fold"], shuffle=True, random_state=42)
+    labels = [c for c in dfx.columns if c != "anchor"]
+    dfx_labels = dfx[labels]
+    dfx["fold"] = -1
+    for fold, (trn_, val_) in enumerate(mskf.split(dfx, dfx_labels)):
+        dfx.loc[val_, "fold"] = fold
+    train = train.merge(dfx[["anchor", "fold"]], on="anchor", how="left")
 
-mskf = MultilabelStratifiedKFold(n_splits=CFG["n_fold"], shuffle=True, random_state=42)
-labels = [c for c in dfx.columns if c != "anchor"]
-dfx_labels = dfx[labels]
-dfx["fold"] = -1
-
-for fold, (trn_, val_) in enumerate(mskf.split(dfx, dfx_labels)):
-    dfx.loc[val_, "fold"] = fold
-
-train = train.merge(dfx[["anchor", "fold"]], on="anchor", how="left")
 
 tokenizer = AutoTokenizer.from_pretrained(CFG["model"])
 tokenizer.save_pretrained(CFG["output_dir"] + "tokenizer/")
@@ -239,17 +236,15 @@ def train_loop(folds, fold):
 
 
 if __name__ == "__main__":
-
-    if CFG["train"]:
-        oof_df = pd.DataFrame()
-        for fold in range(CFG["n_fold"]):
-            if fold in CFG["trn_fold"]:
-                _oof_df = train_loop(train, fold)
-                oof_df = pd.concat([oof_df, _oof_df])
-                LOGGER.info(f"========== fold: {fold} result ==========")
-                get_result(_oof_df)
-        oof_df = oof_df.reset_index(drop=True)
-        LOGGER.info("========== CV ==========")
-        score = get_result(oof_df)
-        LOGGER.info(f"Score: {score:<.4f}")
-        oof_df.to_pickle(CFG["output_dir"] + "oof_df.pkl")
+    oof_df = pd.DataFrame()
+    for fold in range(CFG["n_fold"]):
+        if fold in CFG["trn_fold"]:
+            _oof_df = train_loop(train, fold)
+            oof_df = pd.concat([oof_df, _oof_df])
+            LOGGER.info(f"========== fold: {fold} result ==========")
+            get_result(_oof_df)
+    oof_df = oof_df.reset_index(drop=True)
+    LOGGER.info("========== CV ==========")
+    score = get_result(oof_df)
+    LOGGER.info(f"Score: {score:<.4f}")
+    oof_df.to_pickle(CFG["output_dir"] + "oof_df.pkl")
