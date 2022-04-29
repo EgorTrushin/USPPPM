@@ -6,7 +6,6 @@ import math
 import os
 import random
 import re
-import sys
 import time
 import warnings
 
@@ -28,9 +27,10 @@ from transformers import (
     get_cosine_schedule_with_warmup,
     get_linear_schedule_with_warmup,
 )
+from src.meter import AverageMeter
+from src.logger import get_logger
 
 warnings.filterwarnings("ignore")
-
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 with open("config.yaml", "r") as file_obj:
@@ -41,6 +41,11 @@ if not os.path.exists(CFG["output_dir"]):
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+LOGGER = get_logger()
+
+train = pd.read_csv(CFG["input_dir"] + "train.csv")
+test = pd.read_csv(CFG["input_dir"] + "test.csv")
+submission = pd.read_csv(CFG["input_dir"] + "sample_submission.csv")
 
 # ====================================================
 # Utils
@@ -48,23 +53,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def get_score(y_true, y_pred):
     score = sp.stats.pearsonr(y_true, y_pred)[0]
     return score
-
-
-def get_logger(filename=CFG["output_dir"] + "train"):
-    from logging import INFO, FileHandler, Formatter, StreamHandler, getLogger
-
-    logger = getLogger(__name__)
-    logger.setLevel(INFO)
-    handler1 = StreamHandler()
-    handler1.setFormatter(Formatter("%(message)s"))
-    handler2 = FileHandler(filename=f"{filename}.log")
-    handler2.setFormatter(Formatter("%(message)s"))
-    logger.addHandler(handler1)
-    logger.addHandler(handler2)
-    return logger
-
-
-LOGGER = get_logger()
 
 
 def seed_everything(seed=42):
@@ -78,16 +66,7 @@ def seed_everything(seed=42):
 
 seed_everything(seed=42)
 
-# ====================================================
-# Data Loading
-# ====================================================
-train = pd.read_csv(CFG["input_dir"] + "train.csv")
-test = pd.read_csv(CFG["input_dir"] + "test.csv")
-submission = pd.read_csv(CFG["input_dir"] + "sample_submission.csv")
 
-# ====================================================
-# CPC Data
-# ====================================================
 def get_cpc_texts():
     contexts = []
     pattern = "[A-Z]\d+"
@@ -254,28 +233,6 @@ class CustomModel(nn.Module):
         feature = self.feature(inputs)
         output = self.fc(self.fc_dropout(feature))
         return output
-
-
-# ====================================================
-# Helper functions
-# ====================================================
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
 
 
 def asMinutes(s):
