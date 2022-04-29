@@ -14,7 +14,7 @@ import yaml
 from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
 from sklearn.model_selection import StratifiedKFold
 from torch.optim import AdamW
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import (
     AutoConfig,
@@ -26,6 +26,7 @@ from transformers import (
 from src.meter import AverageMeter
 from src.logger import get_logger
 from src.utils import seed_everything, get_cpc_texts, get_score, timeSince, get_result
+from src.data import TrainDataset
 
 warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
@@ -109,33 +110,6 @@ CFG["max_len"] = (
 )  # CLS + SEP + SEP + SEP
 max_len = CFG["max_len"]
 LOGGER.info(f"max_len: {max_len}")
-
-
-# ====================================================
-# Dataset
-# ====================================================
-def prepare_input(cfg, text):
-    inputs = cfg["tokenizer"](
-        text, add_special_tokens=True, max_length=cfg["max_len"], padding="max_length", return_offsets_mapping=False
-    )
-    for k, v in inputs.items():
-        inputs[k] = torch.tensor(v, dtype=torch.long)
-    return inputs
-
-
-class TrainDataset(Dataset):
-    def __init__(self, cfg, df):
-        self.cfg = cfg
-        self.texts = df["text"].values
-        self.labels = df["score"].values
-
-    def __len__(self):
-        return len(self.labels)
-
-    def __getitem__(self, item):
-        inputs = prepare_input(self.cfg, self.texts[item])
-        label = torch.tensor(self.labels[item], dtype=torch.float)
-        return inputs, label
 
 
 # ====================================================
