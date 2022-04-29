@@ -9,6 +9,7 @@ import math
 import time
 from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
 from sklearn.model_selection import StratifiedKFold
+from tqdm.auto import tqdm
 
 
 def get_folds(train, CFG):
@@ -30,6 +31,30 @@ def get_folds(train, CFG):
             dfx.loc[val_, "fold"] = fold
         train = train.merge(dfx[["anchor", "fold"]], on="anchor", how="left")
     return train
+
+
+def get_max_len(train, cpc_texts, tokenizer):
+    lengths_dict = {}
+
+    lengths = []
+    tk0 = tqdm(cpc_texts.values(), total=len(cpc_texts), disable=True)
+    for text in tk0:
+        length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
+        lengths.append(length)
+    lengths_dict["context_text"] = lengths
+
+    for text_col in ["anchor", "target"]:
+        lengths = []
+        tk0 = tqdm(train[text_col].fillna("").values, total=len(train), disable=True)
+        for text in tk0:
+            length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
+            lengths.append(length)
+        lengths_dict[text_col] = lengths
+
+    max_len = (
+        max(lengths_dict["anchor"]) + max(lengths_dict["target"]) + max(lengths_dict["context_text"]) + 4
+    )  # CLS + SEP + SEP + SEP
+    return max_len
 
 
 def seed_everything(seed=42):

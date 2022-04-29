@@ -12,10 +12,9 @@ import torch.nn as nn
 import yaml
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
-from tqdm.auto import tqdm
 from transformers import AutoTokenizer, get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 from src.logger import get_logger
-from src.utils import seed_everything, get_cpc_texts, get_score, get_result, get_folds
+from src.utils import seed_everything, get_cpc_texts, get_score, get_result, get_folds, get_max_len
 from src.data import TrainDataset
 from src.model import CustomModel
 from src.train import train_fn
@@ -52,31 +51,8 @@ tokenizer = AutoTokenizer.from_pretrained(CFG["model"])
 tokenizer.save_pretrained(CFG["output_dir"] + "tokenizer/")
 CFG["tokenizer"] = tokenizer
 
-
-# ====================================================
-# Define max_len
-# ====================================================
-lengths_dict = {}
-
-lengths = []
-tk0 = tqdm(cpc_texts.values(), total=len(cpc_texts), disable=True)
-for text in tk0:
-    length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
-    lengths.append(length)
-lengths_dict["context_text"] = lengths
-
-for text_col in ["anchor", "target"]:
-    lengths = []
-    tk0 = tqdm(train[text_col].fillna("").values, total=len(train), disable=True)
-    for text in tk0:
-        length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
-        lengths.append(length)
-    lengths_dict[text_col] = lengths
-
-CFG["max_len"] = (
-    max(lengths_dict["anchor"]) + max(lengths_dict["target"]) + max(lengths_dict["context_text"]) + 4
-)  # CLS + SEP + SEP + SEP
-max_len = CFG["max_len"]
+max_len = get_max_len(train, cpc_texts, tokenizer)
+CFG["max_len"] = max_len
 LOGGER.info(f"max_len: {max_len}")
 
 
@@ -102,15 +78,15 @@ def train_loop(folds, fold):
         batch_size=CFG["batch_size"],
         shuffle=True,
         num_workers=CFG["num_workers"],
-        pin_memory=True,
-        drop_last=True,
+        pin_memory=False,
+        drop_last=False,
     )
     valid_loader = DataLoader(
         valid_dataset,
         batch_size=CFG["batch_size"],
         shuffle=False,
         num_workers=CFG["num_workers"],
-        pin_memory=True,
+        pin_memory=False,
         drop_last=False,
     )
 
