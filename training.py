@@ -17,12 +17,12 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
-from src.meter import AverageMeter
 from src.logger import get_logger
-from src.utils import seed_everything, get_cpc_texts, get_score, timeSince, get_result
+from src.utils import seed_everything, get_cpc_texts, get_score, get_result
 from src.data import TrainDataset
 from src.model import CustomModel
 from src.train import train_fn
+from src.valid import valid_fn
 
 warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
@@ -106,37 +106,6 @@ CFG["max_len"] = (
 )  # CLS + SEP + SEP + SEP
 max_len = CFG["max_len"]
 LOGGER.info(f"max_len: {max_len}")
-
-
-def valid_fn(valid_loader, model, criterion, device):
-    losses = AverageMeter()
-    model.eval()
-    preds = []
-    start = time.time()
-    for step, (inputs, labels) in enumerate(valid_loader):
-        for k, v in inputs.items():
-            inputs[k] = v.to(device)
-        labels = labels.to(device)
-        batch_size = labels.size(0)
-        with torch.no_grad():
-            y_preds = model(inputs)
-        loss = criterion(y_preds.view(-1, 1), labels.view(-1, 1))
-        if CFG["gradient_accumulation_steps"] > 1:
-            loss = loss / CFG["gradient_accumulation_steps"]
-        losses.update(loss.item(), batch_size)
-        preds.append(y_preds.sigmoid().to("cpu").numpy())
-        if step % CFG["print_freq"] == 0 or step == (len(valid_loader) - 1):
-            print(
-                "EVAL: [{0}/{1}]"
-                "Elapsed {remain:s}"
-                "Loss: {loss.val:.4f}({loss.avg:.4f})".format(
-                    step, len(valid_loader), loss=losses, remain=timeSince(start, float(step + 1) / len(valid_loader))
-                ),
-                flush=True,
-            )
-    predictions = np.concatenate(preds)
-    predictions = np.concatenate(predictions)
-    return losses.avg, predictions
 
 
 def inference_fn(test_loader, model, device):
@@ -255,7 +224,7 @@ def train_loop(folds, fold):
         start_time = time.time()
 
         avg_loss = train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device, CFG)
-        avg_val_loss, predictions = valid_fn(valid_loader, model, criterion, device)
+        avg_val_loss, predictions = valid_fn(valid_loader, model, criterion, device, CFG)
 
         score = get_score(valid_labels, predictions)
 
