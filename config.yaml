@@ -1,0 +1,27 @@
+input_dir: "/home/egortrushin/datasets/us-patent-phrase-to-phrase-matching/"
+output_dir: "ckpt/"
+apex: True
+print_freq: 100
+num_workers: 4
+model: "roberta-base"
+scheduler: "cosine"
+batch_scheduler: True
+num_cycles: 0.5
+num_warmup_steps: 0
+epochs: 5
+encoder_lr: 0.00002
+decoder_lr: 0.0005
+min_lr: 0.000001
+eps: 0.000001
+betas: [0.9, 0.999]
+batch_size: 8
+fc_dropout: 0.2
+target_size: 1
+max_len: 512
+weight_decay: 0.01
+gradient_accumulation_steps: 1
+max_grad_norm: 1000
+seed: 42
+n_fold: 5
+trn_fold: [0, 1, 2, 3, 4]
+train: True
