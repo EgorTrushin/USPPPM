@@ -6,14 +6,11 @@ import warnings
 
 import pandas as pd
 import torch
-
 import yaml
-
-from transformers import AutoTokenizer
 from src.logger import get_logger
-from src.utils import seed_everything, get_cpc_texts, get_result, get_folds, get_max_len
 from src.train import train_loop
-
+from src.utils import get_cpc_texts, get_folds, get_max_len, get_result, seed_everything
+from transformers import AutoTokenizer
 
 warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
