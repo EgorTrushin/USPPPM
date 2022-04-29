@@ -6,7 +6,6 @@ import os
 import time
 import warnings
 
-import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -106,21 +105,6 @@ CFG["max_len"] = (
 )  # CLS + SEP + SEP + SEP
 max_len = CFG["max_len"]
 LOGGER.info(f"max_len: {max_len}")
-
-
-def inference_fn(test_loader, model, device):
-    preds = []
-    model.eval()
-    model.to(device)
-    tk0 = tqdm(test_loader, total=len(test_loader))
-    for inputs in tk0:
-        for k, v in inputs.items():
-            inputs[k] = v.to(device)
-        with torch.no_grad():
-            y_preds = model(inputs)
-        preds.append(y_preds.sigmoid().to("cpu").numpy())
-    predictions = np.concatenate(preds)
-    return predictions
 
 
 # ====================================================
