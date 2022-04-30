@@ -58,7 +58,7 @@ def train_loop(folds, fold, device, LOGGER, CFG):
     if CFG["loss"] == "BCE":
         criterion = nn.BCEWithLogitsLoss(reduction="mean")
     else:
-        criterion = nn.L1Loss(reduction="mean")
+        criterion = nn.MSELoss(reduction="mean")
 
     best_score = 0.0
 
@@ -66,7 +66,21 @@ def train_loop(folds, fold, device, LOGGER, CFG):
 
         start_time = time.time()
 
-        avg_loss = train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device, CFG)
+        avg_loss, best_score = train_fn(
+            fold,
+            train_loader,
+            valid_loader,
+            model,
+            criterion,
+            optimizer,
+            epoch,
+            scheduler,
+            device,
+            CFG,
+            valid_labels,
+            LOGGER,
+            best_score,
+        )
         avg_val_loss, predictions = valid_fn(valid_loader, model, criterion, device, CFG)
 
         score = get_score(valid_labels, predictions)
@@ -132,7 +146,21 @@ def get_optimizer_params(model, encoder_lr, decoder_lr, weight_decay=0.0):
     return optimizer_parameters
 
 
-def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device, CFG):
+def train_fn(
+    fold,
+    train_loader,
+    valid_loader,
+    model,
+    criterion,
+    optimizer,
+    epoch,
+    scheduler,
+    device,
+    CFG,
+    valid_labels,
+    LOGGER,
+    best_score,
+):
     model.train()
     scaler = torch.cuda.amp.GradScaler(enabled=CFG["apex"])
     losses = AverageMeter()
@@ -145,7 +173,10 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
         batch_size = labels.size(0)
         with torch.cuda.amp.autocast(enabled=CFG["apex"]):
             y_preds = model(inputs)
-        loss = criterion(y_preds.view(-1, 1), labels.view(-1, 1))
+        if CFG["loss"] == "BSE":
+            loss = criterion(y_preds.view(-1, 1), labels.view(-1, 1))
+        else:
+            loss = criterion(y_preds.view(-1, 1).float(), labels.view(-1, 1).float())
         if CFG["gradient_accumulation_steps"] > 1:
             loss = loss / CFG["gradient_accumulation_steps"]
         losses.update(loss.item(), batch_size)
@@ -175,4 +206,14 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
                 ),
                 flush=True,
             )
-    return losses.avg
+            avg_val_loss, predictions = valid_fn(valid_loader, model, criterion, device, CFG)
+            score = get_score(valid_labels, predictions)
+            if best_score < score:
+                best_score = score
+                LOGGER.info(f"Epoch {epoch+1} - Save Best Score: {best_score:.4f}")
+                torch.save(
+                    {"model": model.state_dict(), "predictions": predictions},
+                    CFG["output_dir"] + f"fold{fold}_best.pth",
+                )
+
+    return losses.avg, best_score

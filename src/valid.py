@@ -17,7 +17,10 @@ def valid_fn(valid_loader, model, criterion, device, CFG):
         batch_size = labels.size(0)
         with torch.no_grad():
             y_preds = model(inputs)
-        loss = criterion(y_preds.view(-1, 1), labels.view(-1, 1))
+        if CFG["loss"] == "BCE":
+            loss = criterion(y_preds.view(-1, 1), labels.view(-1, 1))
+        else:
+            loss = criterion(y_preds.view(-1, 1).float(), labels.view(-1, 1).float())
         if CFG["gradient_accumulation_steps"] > 1:
             loss = loss / CFG["gradient_accumulation_steps"]
         losses.update(loss.item(), batch_size)
