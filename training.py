@@ -54,8 +54,8 @@ if __name__ == "__main__":
         if fold in CFG["trn_fold"]:
             _oof_df = train_loop(train, fold, device, LOGGER, CFG)
             oof_df = pd.concat([oof_df, _oof_df])
-            LOGGER.info(f"#### Fold {fold} result")
-            get_result(_oof_df)
+            score = get_result(_oof_df)
+            LOGGER.info(f"#### Fold {fold} result: {score:<.4f}")
     oof_df = oof_df.reset_index(drop=True)
     LOGGER.info("#### CV")
     score = get_result(oof_df)
