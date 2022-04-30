@@ -55,7 +55,10 @@ def train_loop(folds, fold, device, LOGGER, CFG):
     num_train_steps = len(train_loader) * CFG["epochs"]
     scheduler = get_scheduler(CFG, optimizer, num_train_steps)
 
-    criterion = nn.BCEWithLogitsLoss(reduction="mean")
+    if CFG["loss"] == "BCE":
+        criterion = nn.BCEWithLogitsLoss(reduction="mean")
+    else:
+        criterion = nn.L1Loss(reduction="mean")
 
     best_score = 0.0
 
