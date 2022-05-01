@@ -19,7 +19,10 @@ class CustomModel(nn.Module):
         self.fc = nn.Linear(self.config.hidden_size, self.cfg["target_size"])
         self._init_weights(self.fc)
         self.attention = nn.Sequential(
-            nn.Linear(self.config.hidden_size, 512), nn.Tanh(), nn.Linear(512, 1), nn.Softmax(dim=1)
+            nn.Linear(self.config.hidden_size, cfg["att_hidden_size"]),
+            nn.Tanh(),
+            nn.Linear(cfg["att_hidden_size"], 1),
+            nn.Softmax(dim=1),
         )
         self._init_weights(self.attention)
 
