@@ -28,3 +28,4 @@ trn_fold: [0, 1, 2, 3, 4]
 cv_scheme: 1
 loss: "BCE"
 att_hidden_size: 512
+head: "Transformer"
