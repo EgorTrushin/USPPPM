@@ -35,7 +35,11 @@ class CustomModel(nn.Module):
             self.feature_extractor = AutoModelForTokenClassification.from_pretrained(cfg["model"])
             in_features = self.feature_extractor.classifier.in_features
             self.attention = TransformerHead(
-                in_features=in_features, max_length=cfg["max_len"], num_layers=1, nhead=8, num_targets=1
+                in_features=in_features,
+                max_length=cfg["max_len"],
+                num_layers=cfg["transformer_head_layers"],
+                nhead=cfg["nhead"],
+                num_targets=1,
             )
             self.fc_dropout = nn.Dropout(cfg["fc_dropout"])
             self.fc = nn.Linear(self.attention.out_features, self.cfg["target_size"])

@@ -29,3 +29,5 @@ cv_scheme: 1
 loss: "BCE"
 att_hidden_size: 512
 head: "Transformer"
+nhead: 8
+transformer_head_layers: 1
