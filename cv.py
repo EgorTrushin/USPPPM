@@ -82,11 +82,11 @@ else:
 
 if __name__ == "__main__":
 
-    oof_df = get_oof_df("MSE_08266/ckpt/")
+    oof_df = get_oof_df("deberta_v3_large_bce_8319_838/ckpt/")
     score = get_result(oof_df)
     print(f"CV = {score:<.4f}")
 
-    oof_df1 = get_oof_df("BCE_08308/ckpt/")
+    oof_df1 = get_oof_df("deberta_v3_large_rmse_8230/ckpt/")
     score = get_result(oof_df1)
     print(f"CV = {score:<.4f}")
 

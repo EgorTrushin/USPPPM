@@ -18,41 +18,40 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 if __name__ == "__main__":
     with open("config.yaml", "r") as file_obj:
-        CFG = yaml.safe_load(file_obj)
+        config = yaml.safe_load(file_obj)
 
-    if not os.path.exists(CFG["output_dir"]):
-        os.makedirs(CFG["output_dir"])
+    if not os.path.exists(config["output_dir"]):
+        os.makedirs(config["output_dir"])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    seed_everything(seed=CFG["seed"])
+    seed_everything(seed=config["seed"])
 
-    LOGGER = get_logger(CFG["output_dir"] + "train")
+    LOGGER = get_logger(config["output_dir"] + "train")
 
-    train = pd.read_csv(CFG["input_dir"] + "train.csv")
-    # test = pd.read_csv(CFG["input_dir"] + "test.csv")
-    submission = pd.read_csv(CFG["input_dir"] + "sample_submission.csv")
+    train = pd.read_csv(config["input_dir"] + "train.csv")
+    submission = pd.read_csv(config["input_dir"] + "sample_submission.csv")
 
-    cpc_texts = get_cpc_texts(CFG)
-    torch.save(cpc_texts, CFG["output_dir"] + "cpc_texts.pth")
+    cpc_texts = get_cpc_texts(config)
+    torch.save(cpc_texts, config["output_dir"] + "cpc_texts.pth")
     train["context_text"] = train["context"].map(cpc_texts)
 
     train["text"] = train["anchor"] + "[SEP]" + train["target"] + "[SEP]" + train["context_text"]
 
-    train = get_folds(train, CFG)
+    train = get_folds(train, config)
 
-    tokenizer = AutoTokenizer.from_pretrained(CFG["model"])
-    tokenizer.save_pretrained(CFG["output_dir"] + "tokenizer/")
-    CFG["tokenizer"] = tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(config["model"])
+    tokenizer.save_pretrained(config["output_dir"] + "tokenizer/")
+    config["tokenizer"] = tokenizer
 
     max_len = get_max_len(train, cpc_texts, tokenizer)
-    CFG["max_len"] = max_len
+    config["max_len"] = max_len
     LOGGER.info(f"max_len: {max_len}")
 
     oof_df = pd.DataFrame()
-    for fold in range(CFG["n_fold"]):
-        if fold in CFG["trn_fold"]:
-            _oof_df = train_loop(train, fold, device, LOGGER, CFG)
+    for fold in range(config["n_fold"]):
+        if fold in config["trn_fold"]:
+            _oof_df = train_loop(train, fold, device, LOGGER, config)
             oof_df = pd.concat([oof_df, _oof_df])
             score = get_result(_oof_df)
             LOGGER.info(f"#### Fold {fold} result: {score:<.4f}")
@@ -60,4 +59,4 @@ if __name__ == "__main__":
     LOGGER.info("#### CV")
     score = get_result(oof_df)
     LOGGER.info(f"Score: {score:<.4f}")
-    oof_df.to_pickle(CFG["output_dir"] + "oof_df.pkl")
+    oof_df.to_pickle(config["output_dir"] + "oof_df.pkl")
