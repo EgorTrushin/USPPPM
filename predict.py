@@ -226,6 +226,8 @@ if __name__ == "__main__":
     config["input_dir"] = "/home/egortrushin/datasets/us-patent-phrase-to-phrase-matching/"
     config["model"]["base_model_name"] = "microsoft/deberta-v3-large"
     config["max_len"] = 133
+    config["num_workers"] = 1
+    config["val_batch_size"] = 32
 
     df = pd.read_csv(config["input_dir"] + "test.csv")
     cpc_texts = get_cpc_texts(config)
