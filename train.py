@@ -14,7 +14,13 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from scipy.stats import pearsonr
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from transformers import AutoConfig, AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
+from transformers import (
+    AutoConfig,
+    AutoModel,
+    AutoTokenizer,
+    AutoModelForSequenceClassification,
+    get_linear_schedule_with_warmup,
+)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
@@ -131,10 +137,8 @@ class NakamaModel(nn.Module):
         """Initialize model."""
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_name, output_hidden_states=True)
-        if pretrained:
-            self.model = AutoModel.from_pretrained(model_name, config=self.config)
-        else:
-            self.model = AutoModel.from_config(self.config)
+
+        self.model = AutoModel.from_config(self.config)
 
         self.attention = nn.Sequential(
             nn.Linear(self.config.hidden_size, hparams["att_hidden_size"]),
@@ -174,6 +178,23 @@ class NakamaModel(nn.Module):
         return output
 
 
+class SimpleModel(nn.Module):
+    def __init__(self, model_name, hparams):
+        super().__init__()
+
+        config = AutoConfig.from_pretrained(model_name)
+        config.num_labels = 1
+        self.base = AutoModelForSequenceClassification.from_config(config=config)
+        dim = config.hidden_size
+        self.dropout = nn.Dropout(p=hparams["fc_dropout"])
+        self.cls = nn.Linear(dim, 1)
+
+    def forward(self, inputs):
+        base_output = self.base(**inputs)
+
+        return base_output[0]
+
+
 loss_dict = {
     "BCEWithLogitsLoss": nn.BCEWithLogitsLoss(),
     "MSELoss": nn.MSELoss(),
@@ -193,6 +214,8 @@ class PhraseSimilarityModel(pl.LightningModule):
         # Create model
         if self.hparams.model_name == "NakamaModel":
             self.model = NakamaModel(self.hparams.base_model_name, self.hparams.model_hparams)
+        elif self.hparams.model_name == "SimpleModel":
+            self.model = SimpleModel(self.hparams.base_model_name, self.hparams.model_hparams)
         else:
             assert False, f'Unknown model_name: "{self.hparams.model_name}"'
         # Create loss
