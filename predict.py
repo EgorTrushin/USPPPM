@@ -92,7 +92,7 @@ class NakamaModel(nn.Module):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_name, output_hidden_states=True)
 
-        self.model = AutoModel.from_config(self.config)
+        self.model = AutoModel.from_pretrained(model_name, self.config)
 
         self.attention = nn.Sequential(
             nn.Linear(self.config.hidden_size, hparams["att_hidden_size"]),
@@ -138,7 +138,7 @@ class SimpleModel(nn.Module):
 
         config = AutoConfig.from_pretrained(model_name)
         config.num_labels = 1
-        self.base = AutoModelForSequenceClassification.from_config(config=config)
+        self.base = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
         dim = config.hidden_size
         self.dropout = nn.Dropout(p=hparams["fc_dropout"])
         self.cls = nn.Linear(dim, 1)
@@ -168,6 +168,8 @@ class PhraseSimilarityModel(pl.LightningModule):
         # Create model
         if self.hparams.model_name == "NakamaModel":
             self.model = NakamaModel(self.hparams.base_model_name, self.hparams.model_hparams)
+        elif self.hparams.model_name == "SimpleModel":
+            self.model = SimpleModel(self.hparams.base_model_name, self.hparams.model_hparams)
         else:
             assert False, f'Unknown model_name: "{self.hparams.model_name}"'
         # Create loss
