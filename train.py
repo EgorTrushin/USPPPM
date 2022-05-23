@@ -269,7 +269,6 @@ if __name__ == "__main__":
 
     df = pd.read_csv(config["input_dir"] + "train.csv")
     cpc_texts = get_cpc_texts(config)
-    torch.save(cpc_texts, config["output_dir"] + "cpc_texts.pth")
     df["context_text"] = df["context"].map(cpc_texts)
     if config["context_text_lower"]:
         df["text"] = df["anchor"] + "[SEP]" + df["target"] + "[SEP]" + df["context_text"].apply(str.lower)
