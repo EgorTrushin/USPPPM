@@ -91,10 +91,8 @@ class NakamaModel(nn.Module):
         """Initialize model."""
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_name, output_hidden_states=True)
-        if pretrained:
-            self.model = AutoModel.from_pretrained(model_name, config=self.config)
-        else:
-            self.model = AutoModel.from_config(self.config)
+
+        self.model = AutoModel.from_config(self.config)
 
         self.attention = nn.Sequential(
             nn.Linear(self.config.hidden_size, hparams["att_hidden_size"]),
@@ -132,6 +130,23 @@ class NakamaModel(nn.Module):
         feature = self.feature(inputs)
         output = self.fc(self.fc_dropout(feature))
         return output
+
+
+class SimpleModel(nn.Module):
+    def __init__(self, model_name, hparams):
+        super().__init__()
+
+        config = AutoConfig.from_pretrained(model_name)
+        config.num_labels = 1
+        self.base = AutoModelForSequenceClassification.from_config(config=config)
+        dim = config.hidden_size
+        self.dropout = nn.Dropout(p=hparams["fc_dropout"])
+        self.cls = nn.Linear(dim, 1)
+
+    def forward(self, inputs):
+        base_output = self.base(**inputs)
+
+        return base_output[0]
 
 
 loss_dict = {
