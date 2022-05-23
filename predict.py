@@ -92,7 +92,7 @@ class NakamaModel(nn.Module):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_name, output_hidden_states=True)
 
-        self.model = AutoModel.from_pretrained(model_name, self.config)
+        self.model = AutoModel.from_pretrained(model_name, config=self.config)
 
         self.attention = nn.Sequential(
             nn.Linear(self.config.hidden_size, hparams["att_hidden_size"]),
