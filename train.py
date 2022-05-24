@@ -189,7 +189,6 @@ class SimpleModel(nn.Module):
 
     def forward(self, inputs):
         base_output = self.base(**inputs)
-
         return base_output[0]
 
 
