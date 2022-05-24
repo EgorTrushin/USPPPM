@@ -184,6 +184,7 @@ class SimpleModel(nn.Module):
 
         config = AutoConfig.from_pretrained(model_name)
         config.num_labels = 1
+        config.hidden_dropout_prob = hparams["fc_dropout"]
         self.base = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
 
     def forward(self, inputs):
