@@ -185,9 +185,6 @@ class SimpleModel(nn.Module):
         config = AutoConfig.from_pretrained(model_name)
         config.num_labels = 1
         self.base = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
-        dim = config.hidden_size
-        self.dropout = nn.Dropout(p=hparams["fc_dropout"])
-        self.cls = nn.Linear(dim, 1)
 
     def forward(self, inputs):
         base_output = self.base(**inputs)

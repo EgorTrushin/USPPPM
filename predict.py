@@ -13,7 +13,13 @@ import torch.nn as nn
 import yaml
 from scipy.stats import pearsonr
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoConfig, AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
+from transformers import (
+    AutoConfig,
+    AutoModel,
+    AutoTokenizer,
+    get_linear_schedule_with_warmup,
+    AutoModelForSequenceClassification,
+)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
@@ -139,9 +145,6 @@ class SimpleModel(nn.Module):
         config = AutoConfig.from_pretrained(model_name)
         config.num_labels = 1
         self.base = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
-        dim = config.hidden_size
-        self.dropout = nn.Dropout(p=hparams["fc_dropout"])
-        self.cls = nn.Linear(dim, 1)
 
     def forward(self, inputs):
         base_output = self.base(**inputs)
