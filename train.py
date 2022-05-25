@@ -20,6 +20,7 @@ from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
     get_linear_schedule_with_warmup,
+    get_cosine_schedule_with_warmup,
 )
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
@@ -233,6 +234,12 @@ class PhraseSimilarityModel(pl.LightningModule):
         total_steps = len(self.train_dataloader()) * self.trainer.max_epochs
         if self.hparams.scheduler_name == "linear_schedule_with_warmup":
             self.scheduler = get_linear_schedule_with_warmup(
+                optimizer=self.optimizer,
+                num_warmup_steps=0,
+                num_training_steps=total_steps,
+            )
+        if self.hparams.scheduler_name == "cosine_schedule_with_warmup":
+            self.scheduler = get_cosine_schedule_with_warmup(
                 optimizer=self.optimizer,
                 num_warmup_steps=0,
                 num_training_steps=total_steps,
