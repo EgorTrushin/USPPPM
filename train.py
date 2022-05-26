@@ -193,6 +193,31 @@ class SimpleModel(nn.Module):
         return base_output[0]
 
 
+class AbhishekModel(nn.Module):
+    def __init__(self, model_name, hparams):
+        super().__init__()
+        self.model_name = model_name
+
+        config = AutoConfig.from_pretrained(model_name)
+        config.update(
+            {
+                "output_hidden_states": True,
+                "add_pooling_layer": True,
+                "num_labels": 1,
+            }
+        )
+        self.transformer = AutoModel.from_pretrained(model_name, config=config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.output = nn.Linear(config.hidden_size, 1)
+
+    def forward(self, inputs):
+        transformer_out = self.transformer(**inputs)
+        output = transformer_out.pooler_output
+        output = self.dropout(output)
+        output = self.output(output)
+        return output
+
+
 loss_dict = {
     "BCEWithLogitsLoss": nn.BCEWithLogitsLoss(),
     "MSELoss": nn.MSELoss(),
@@ -214,6 +239,8 @@ class PhraseSimilarityModel(pl.LightningModule):
             self.model = NakamaModel(self.hparams.base_model_name, self.hparams.model_hparams)
         elif self.hparams.model_name == "SimpleModel":
             self.model = SimpleModel(self.hparams.base_model_name, self.hparams.model_hparams)
+        elif self.hparams.model_name == "AbhishekModel":
+            self.model = AbhishekModel(self.hparams.base_model_name, self.hparams.model_hparams)
         else:
             assert False, f'Unknown model_name: "{self.hparams.model_name}"'
         # Create loss

@@ -11,7 +11,7 @@ fold_seed: 42
 trn_fold: [0, 1, 2, 3, 4]
 
 model:
-    model_name: "SimpleModel"
+    model_name: "AbhishekModel"
     base_model_name: "microsoft/deberta-v3-small"
     model_hparams:
         att_hidden_size: 768
