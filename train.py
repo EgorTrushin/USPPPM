@@ -294,7 +294,7 @@ class PhraseSimilarityModel(pl.LightningModule):
         preds = self.model(inputs)
         loss = self.loss(preds.squeeze(1), labels)
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        return {"preds": preds.squeeze(dim=-1), "labels": batch[1].squeeze(dim=-1)}
+        return {"preds": preds.squeeze(dim=-1), "labels": batch[1].squeeze(dim=-1), "val_loss": loss}
 
     def validation_epoch_end(self, outs):
         """Calculate Pearson score at the end of validation."""
@@ -355,12 +355,12 @@ if __name__ == "__main__":
                 val_dataset, batch_size=config["val_batch_size"], num_workers=config["num_workers"], shuffle=False
             )
 
-            filename = f"model-f{fold}-{{val_score:.4f}}"
+            filename = f"model-f{fold}-{{val_loss:.4f}}-{{val_score:.4f}}"
             checkpoint_callback = ModelCheckpoint(
                 save_weights_only=True,
-                monitor="val_score",
+                monitor="val_loss",
                 dirpath=config["output_dir"],
-                mode="max",
+                mode="min",
                 filename=filename,
                 verbose=1,
             )
