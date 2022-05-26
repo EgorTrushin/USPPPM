@@ -265,7 +265,7 @@ class PhraseSimilarityModel(pl.LightningModule):
                 num_warmup_steps=0,
                 num_training_steps=total_steps,
             )
-        if self.hparams.scheduler_name == "cosine_schedule_with_warmup":
+        elif self.hparams.scheduler_name == "cosine_schedule_with_warmup":
             self.scheduler = get_cosine_schedule_with_warmup(
                 optimizer=self.optimizer,
                 num_warmup_steps=0,
