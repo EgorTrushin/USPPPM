@@ -3,11 +3,13 @@
 
 import os
 import re
+import glob
 
 import pandas as pd
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+import numpy as np
 import yaml
 from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -308,7 +310,8 @@ if __name__ == "__main__":
     if not os.path.exists(config["output_dir"]):
         os.makedirs(config["output_dir"])
 
-    df = pd.read_csv(config["input_dir"] + "train.csv")
+    df = pd.read_csv(config["input_dir"] + "folds.csv")
+
     cpc_texts = get_cpc_texts(config)
     df["context_text"] = df["context"].map(cpc_texts)
     if config["context_text_lower"]:
@@ -316,7 +319,7 @@ if __name__ == "__main__":
     else:
         df["text"] = df["anchor"] + "[SEP]" + df["target"] + "[SEP]" + df["context_text"]
 
-    df = get_folds(df, config)
+    #df = get_folds(df, config)
 
     tokenizer = AutoTokenizer.from_pretrained(config["model"]["base_model_name"])
     max_len = get_max_len(df, cpc_texts, tokenizer)
@@ -326,39 +329,37 @@ if __name__ == "__main__":
     pl.seed_everything(config["seed"])
 
     for fold in range(config["n_fold"]):
-        if fold in config["trn_fold"]:
-            print(f"#### Fold {fold} training")
+        path = glob.glob(config["output_dir"] + f"*-f{fold}-*")[0]
+        print(path)
 
-            train_df = df[df["fold"] != fold].reset_index(drop=True)
-            valid_df = df[df["fold"] == fold].reset_index(drop=True)
+        valid_df = df[df["fold"] == fold].reset_index(drop=True)
 
-            train_dataset = PhraseSimilarityDataset(train_df, tokenizer, config["max_len"])
-            val_dataset = PhraseSimilarityDataset(valid_df, tokenizer, config["max_len"])
+        val_dataset = PhraseSimilarityDataset(valid_df, tokenizer, config["max_len"], with_labels=False)
 
-            train_dataloader = DataLoader(
-                train_dataset, batch_size=config["trn_batch_size"], num_workers=config["num_workers"], shuffle=True
-            )
-            val_dataloader = DataLoader(
-                val_dataset, batch_size=config["val_batch_size"], num_workers=config["num_workers"], shuffle=False
-            )
+        val_dataloader = DataLoader(
+            val_dataset, batch_size=config["val_batch_size"], num_workers=config["num_workers"], shuffle=False
+        )
 
-            filename = f"model-f{fold}-{{val_loss:.4f}}-{{val_score:.4f}}"
-            checkpoint_callback = ModelCheckpoint(
-                save_weights_only=True,
-                monitor="val_loss",
-                dirpath=config["output_dir"],
-                mode="min",
-                filename=filename,
-                verbose=1,
-            )
+        trainer = pl.Trainer(
+            gpus=-1 if torch.cuda.is_available() else 0,
+            logger=None,
+            **config["trainer"],
+        )
 
-            trainer = pl.Trainer(
-                gpus=-1 if torch.cuda.is_available() else 0,
-                logger=None,
-                callbacks=[checkpoint_callback],
-                **config["trainer"],
-            )
+        driver = PhraseSimilarityModel.load_from_checkpoint(path, **config["model"])
 
-            driver = PhraseSimilarityModel(**config["model"])
+        predictions = trainer.predict(driver, val_dataloader)
 
-            trainer.fit(driver, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
+        preds = []
+        for p in predictions:
+            preds.append(p)
+
+        preds = torch.cat(preds).cpu().numpy().flatten()
+
+        # preds = (preds - preds.min())/(preds.max()-preds.min())
+
+        print(get_pearson_score(valid_df.score.values, preds))
+
+        valid_df['pred'] = preds
+        valid_df = valid_df[["id", "score", "pred"]]
+        valid_df.to_csv(f'oof_f{fold}.csv', index = False)

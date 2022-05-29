@@ -11,13 +11,13 @@ fold_seed: 42
 trn_fold: [0, 1, 2, 3, 4]
 
 model:
-    model_name: "AbhishekModel"
+    model_name: "SimpleModel"
     base_model_name: "microsoft/deberta-v3-small"
     model_hparams:
         att_hidden_size: 768
         target_size: 1
         fc_dropout: 0.2
-    loss_name: "BCEWithLogitsLoss"
+    loss_name: "PearsonLoss"
     optimizer_name: "AdamW"
     optimizer_hparams:
         lr: 0.00002
