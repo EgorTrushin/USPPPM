@@ -400,9 +400,9 @@ if __name__ == "__main__":
             filename = f"model-f{fold}-{{val_loss:.4f}}-{{val_score:.4f}}"
             checkpoint_callback = ModelCheckpoint(
                 save_weights_only=True,
-                monitor="val_loss",
+                monitor="val_score",
                 dirpath=config["output_dir"],
-                mode="min",
+                mode="max",
                 filename=filename,
                 verbose=1,
             )
