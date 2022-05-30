@@ -57,21 +57,6 @@ def get_cpc_texts(config):
     return results
 
 
-def get_folds(df, config):
-    """Fold splitting using MultilabelStratifiedKFold."""
-    dfx = pd.get_dummies(df, columns=["score"]).groupby(["anchor"], as_index=False).sum()
-    cols = [c for c in dfx.columns if c.startswith("score_") or c == "anchor"]
-    dfx = dfx[cols]
-    mskf = MultilabelStratifiedKFold(n_splits=config["n_fold"], shuffle=True, random_state=config["fold_seed"])
-    labels = [c for c in dfx.columns if c != "anchor"]
-    dfx_labels = dfx[labels]
-    dfx["fold"] = -1
-    for fold, (trn_, val_) in enumerate(mskf.split(dfx, dfx_labels)):
-        dfx.loc[val_, "fold"] = fold
-    df = df.merge(dfx[["anchor", "fold"]], on="anchor", how="left")
-    return df
-
-
 def get_max_len(train, cpc_texts, tokenizer):
     """Determine max_len."""
     lengths_dict = {}
@@ -377,15 +362,13 @@ if __name__ == "__main__":
     if not os.path.exists(config["output_dir"]):
         os.makedirs(config["output_dir"])
 
-    df = pd.read_csv(config["input_dir"] + "train.csv")
+    df = pd.read_csv(config["input_dir"] + "folds.csv")
     cpc_texts = get_cpc_texts(config)
     df["context_text"] = df["context"].map(cpc_texts)
     if config["context_text_lower"]:
         df["text"] = df["anchor"] + "[SEP]" + df["target"] + "[SEP]" + df["context_text"].apply(str.lower)
     else:
         df["text"] = df["anchor"] + "[SEP]" + df["target"] + "[SEP]" + df["context_text"]
-
-    df = get_folds(df, config)
 
     tokenizer = AutoTokenizer.from_pretrained(config["model"]["base_model_name"])
     max_len = get_max_len(df, cpc_texts, tokenizer)
