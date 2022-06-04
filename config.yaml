@@ -11,13 +11,11 @@ fold_seed: 42
 trn_fold: [0, 1, 2, 3, 4]
 
 model:
-    model_name: "TransformerHeadModel"
+    model_name: "SimpleModel"
     base_model_name: "microsoft/deberta-v3-small"
     model_hparams:
         fc_dropout: 0.0
-        nhead: 2
-        num_layers: 1
-    loss_name: "PearsonLoss"
+    loss_name: "MSLELoss"
     optimizer_name: "AdamW"
     optimizer_hparams:
         lr: 0.00002

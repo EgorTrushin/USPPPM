@@ -258,10 +258,25 @@ class PearsonLoss(nn.Module):
         return -r
 
 
+def RMSELoss(yhat, y):
+    return torch.sqrt(torch.mean((yhat - y) ** 2))
+
+
+def RMSLELoss(yhat, y):
+    return torch.sqrt(torch.mean((torch.log(yhat + 1) - torch.log(y + 1)) ** 2))
+
+
+def MSLELoss(yhat, y):
+    return torch.mean((torch.log(yhat + 1) - torch.log(y + 1)) ** 2)
+
+
 loss_dict = {
     "BCEWithLogitsLoss": nn.BCEWithLogitsLoss(),
     "MSELoss": nn.MSELoss(),
     "PearsonLoss": PearsonLoss(),
+    "RMSELoss": RMSELoss,
+    "RMSLELoss": RMSLELoss,
+    "MSLELoss": MSLELoss,
 }
 
 
