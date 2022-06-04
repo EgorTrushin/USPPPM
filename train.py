@@ -9,7 +9,6 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import yaml
-from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
 from pytorch_lightning.callbacks import ModelCheckpoint
 from scipy.stats import pearsonr
 from torch.utils.data import DataLoader, Dataset
