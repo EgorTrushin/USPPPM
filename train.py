@@ -179,71 +179,6 @@ class SimpleModel(nn.Module):
         return base_output[0]
 
 
-class TransformerHead(nn.Module):
-    def __init__(self, in_features, max_length, num_layers=1, nhead=8, num_targets=1):
-        super().__init__()
-
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer=nn.TransformerEncoderLayer(d_model=in_features, nhead=nhead), num_layers=num_layers
-        )
-        self.row_fc = nn.Linear(in_features, 1)
-        self.out_features = max_length
-
-    def forward(self, x):
-        out = self.transformer(x)
-        out = self.row_fc(out).squeeze(-1)
-        return out
-
-
-class TransformerHeadModel(nn.Module):
-    def __init__(self, model_name, hparams):
-        super().__init__()
-
-        self.config = AutoConfig.from_pretrained(model_name, output_hidden_states=True)
-
-        self.model = AutoModel.from_pretrained(model_name, config=self.config)
-
-        self.feature_extractor = AutoModelForTokenClassification.from_pretrained(model_name)
-        in_features = self.feature_extractor.classifier.in_features
-        self.attention = TransformerHead(
-            in_features=in_features,
-            max_length=hparams["max_len"],
-            num_layers=hparams["num_layers"],
-            nhead=hparams["nhead"],
-            num_targets=1,
-        )
-        self.fc_dropout = nn.Dropout(hparams["fc_dropout"])
-        self.fc = nn.Linear(self.attention.out_features, 1)
-        self._init_weights(self.fc)
-        self._init_weights(self.attention)
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-
-    def feature(self, inputs):
-        outputs = self.model(**inputs)
-        last_hidden_states = outputs[0]
-        feature = self.attention(last_hidden_states)
-
-        return feature
-
-    def forward(self, inputs):
-        feature = self.feature(inputs)
-        # print(feature.shape)
-        output = self.fc(self.fc_dropout(feature))
-        return output
-
-
 class PearsonLoss(nn.Module):
     def __init__(self):
         super().__init__()
@@ -294,8 +229,6 @@ class PhraseSimilarityModel(pl.LightningModule):
             self.model = NakamaModel(self.hparams.base_model_name, self.hparams.model_hparams)
         elif self.hparams.model_name == "SimpleModel":
             self.model = SimpleModel(self.hparams.base_model_name, self.hparams.model_hparams)
-        elif self.hparams.model_name == "TransformerHeadModel":
-            self.model = TransformerHeadModel(self.hparams.base_model_name, self.hparams.model_hparams)
         else:
             assert False, f'Unknown model_name: "{self.hparams.model_name}"'
         # Create loss
@@ -388,9 +321,6 @@ if __name__ == "__main__":
     max_len = get_max_len(df, cpc_texts, tokenizer)
     config["max_len"] = max_len
     print("max_len:", max_len)
-
-    if config["model"]["model_name"] == "TransformerHeadModel":
-        config["model"]["model_hparams"]["max_len"] = max_len
 
     pl.seed_everything(config["seed"])
 
