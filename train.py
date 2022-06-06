@@ -9,6 +9,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import yaml
+import numpy as np
 from pytorch_lightning.callbacks import ModelCheckpoint
 from scipy.stats import pearsonr
 from torch.utils.data import DataLoader, Dataset
@@ -17,7 +18,6 @@ from transformers import (
     AutoConfig,
     AutoModel,
     AutoTokenizer,
-    AutoModelForSequenceClassification,
     AutoModelForTokenClassification,
     get_linear_schedule_with_warmup,
     get_cosine_schedule_with_warmup,
@@ -360,7 +360,9 @@ class MeanPoolingModel(nn.Module):
     def forward(self, inputs):
         # base_output = self.base(**inputs)
         # return base_output[0]
-        out = self.base(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], output_hidden_states=False)
+        out = self.base(
+            input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], output_hidden_states=False
+        )
         out = self.pooler(out.last_hidden_state, inputs["attention_mask"])
         out = self.drop(out)
         outputs = self.fc(out)
