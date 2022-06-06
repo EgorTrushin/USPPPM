@@ -359,7 +359,7 @@ class MeanPoolingModel(nn.Module):
     def forward(self, inputs):
         # base_output = self.base(**inputs)
         # return base_output[0]
-        out = self.base(input_ids=inputs["token_id"], attention_mask=inputs["token_mask"], output_hidden_states=False)
+        out = self.base(input_ids=inputs["token_ids"], attention_mask=inputs["mask"], output_hidden_states=False)
         out = self.pooler(out.last_hidden_state, inputs["token_mask"])
         out = self.drop(out)
         outputs = self.fc(out)
