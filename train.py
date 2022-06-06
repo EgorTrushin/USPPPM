@@ -419,9 +419,9 @@ class PhraseSimilarityModel(pl.LightningModule):
         elif self.hparams.model_name == "MDropModel":
             self.model = MDropModel(self.hparams.base_model_name, self.hparams.model_hparams)
         elif self.hparams.model_name == "WKPoolingModel":
-            self.model = MDropModel(self.hparams.base_model_name, self.hparams.model_hparams)
+            self.model = WKPoolingModel(self.hparams.base_model_name, self.hparams.model_hparams)
         elif self.hparams.model_name == "MeanPoolingModel":
-            self.model = MDropModel(self.hparams.base_model_name, self.hparams.model_hparams)
+            self.model = MeanPoolingModel(self.hparams.base_model_name, self.hparams.model_hparams)
         else:
             assert False, f'Unknown model_name: "{self.hparams.model_name}"'
         # Create loss
