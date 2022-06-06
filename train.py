@@ -179,6 +179,33 @@ class SimpleModel(nn.Module):
         return base_output[0]
 
 
+class MDropModel(nn.Module):
+    def __init__(self, model_name, hparams):
+        super().__init__()
+
+        config = AutoConfig.from_pretrained(model_name)
+        config.output_hidden_states = True
+        self.base = AutoModel.from_pretrained(model_name, config=config)
+        dim = config.hidden_size
+        self.dropout_0 = nn.Dropout(p=0)
+        self.dropout_1 = nn.Dropout(p=0.1)
+        self.dropout_2 = nn.Dropout(p=0.2)
+        self.dropout_3 = nn.Dropout(p=0.3)
+        self.dropout_4 = nn.Dropout(p=0.4)
+        self.cls = nn.Linear(dim, 1)
+
+    def forward(self, inputs):
+        base_output = self.base(**inputs)
+        output = base_output.hidden_states[-1]
+        output_0 = self.cls(self.dropout_0(torch.mean(output, dim=1)))
+        output_1 = self.cls(self.dropout_1(torch.mean(output, dim=1)))
+        output_2 = self.cls(self.dropout_2(torch.mean(output, dim=1)))
+        output_3 = self.cls(self.dropout_3(torch.mean(output, dim=1)))
+        output_4 = self.cls(self.dropout_4(torch.mean(output, dim=1)))
+        output = torch.mean(torch.stack([output_0, output_1, output_2, output_3, output_4], dim=0), dim=0)
+        return output
+
+
 class PearsonLoss(nn.Module):
     def __init__(self):
         super().__init__()
@@ -229,6 +256,8 @@ class PhraseSimilarityModel(pl.LightningModule):
             self.model = NakamaModel(self.hparams.base_model_name, self.hparams.model_hparams)
         elif self.hparams.model_name == "SimpleModel":
             self.model = SimpleModel(self.hparams.base_model_name, self.hparams.model_hparams)
+        elif self.hparams.model_name == "MDropModel":
+            self.model = MDropModel(self.hparams.base_model_name, self.hparams.model_hparams)
         else:
             assert False, f'Unknown model_name: "{self.hparams.model_name}"'
         # Create loss
