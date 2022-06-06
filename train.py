@@ -326,7 +326,7 @@ class WKPoolingModel(nn.Module):
             module.weight.data.fill_(1.0)
 
     def forward(self, inputs):
-        outputs = self.model(input_ids=inputs["token_ids"], attention_mask=inputs["mask"])
+        outputs = self.model(input_ids=inputs["input_ids"], attention_mask=inputs["mask"])
         all_hidden_states = torch.stack(outputs[1])
         wkpooling_embeddings = self.wkpool(all_hidden_states, inputs)
         logits = self.fc(wkpooling_embeddings)  # regression head
@@ -359,7 +359,7 @@ class MeanPoolingModel(nn.Module):
     def forward(self, inputs):
         # base_output = self.base(**inputs)
         # return base_output[0]
-        out = self.base(input_ids=inputs["token_ids"], attention_mask=inputs["mask"], output_hidden_states=False)
+        out = self.base(input_ids=inputs["input_ids"], attention_mask=inputs["mask"], output_hidden_states=False)
         out = self.pooler(out.last_hidden_state, inputs["token_mask"])
         out = self.drop(out)
         outputs = self.fc(out)
