@@ -18,6 +18,7 @@ from transformers import (
     AutoModel,
     AutoTokenizer,
     AutoModelForSequenceClassification,
+    AutoModelForTokenClassification,
     get_linear_schedule_with_warmup,
     get_cosine_schedule_with_warmup,
 )
@@ -220,7 +221,7 @@ class WKPooling(nn.Module):
         # torch.qr is slow on GPU (see https://github.com/pytorch/pytorch/issues/22573). So compute it on CPU until issue is fixed
         all_layer_embedding = all_layer_embedding.cpu()
 
-        attention_mask = batch["token_mask"].cpu().numpy()
+        attention_mask = batch["attention_mask"].cpu().numpy()
         unmask_num = np.array([sum(mask) for mask in attention_mask]) - 1  # Not considering the last item
         embedding = []
         # One sentence at a time
@@ -326,7 +327,7 @@ class WKPoolingModel(nn.Module):
             module.weight.data.fill_(1.0)
 
     def forward(self, inputs):
-        outputs = self.model(input_ids=inputs["input_ids"], attention_mask=inputs["mask"])
+        outputs = self.model(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"])
         all_hidden_states = torch.stack(outputs[1])
         wkpooling_embeddings = self.wkpool(all_hidden_states, inputs)
         logits = self.fc(wkpooling_embeddings)  # regression head
@@ -359,8 +360,8 @@ class MeanPoolingModel(nn.Module):
     def forward(self, inputs):
         # base_output = self.base(**inputs)
         # return base_output[0]
-        out = self.base(input_ids=inputs["input_ids"], attention_mask=inputs["mask"], output_hidden_states=False)
-        out = self.pooler(out.last_hidden_state, inputs["token_mask"])
+        out = self.base(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], output_hidden_states=False)
+        out = self.pooler(out.last_hidden_state, inputs["attention_mask"])
         out = self.drop(out)
         outputs = self.fc(out)
         return outputs
