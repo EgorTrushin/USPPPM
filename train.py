@@ -17,7 +17,7 @@ from transformers import (
     AutoConfig,
     AutoModel,
     AutoTokenizer,
-    AutoModelForTokenClassification,
+    AutoModelForSequenceClassification,
     get_linear_schedule_with_warmup,
     get_cosine_schedule_with_warmup,
 )
