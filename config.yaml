@@ -12,7 +12,7 @@ trn_fold: [0, 1, 2, 3, 4]
 
 model:
     model_name: "SimpleModel"
-    base_model_name: "microsoft/deberta-v3-small"
+    base_model_name: "/home/egortrushin/GitHub/cocolm-base"
     model_hparams:
         fc_dropout: 0.0
         att_hidden_size: 1024

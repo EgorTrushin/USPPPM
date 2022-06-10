@@ -22,7 +22,9 @@ from transformers import (
     get_linear_schedule_with_warmup,
     get_cosine_schedule_with_warmup,
 )
-
+from cocolm.modeling_cocolm import COCOLMForSequenceClassification
+from cocolm.configuration_cocolm import COCOLMConfig
+from cocolm.tokenization_cocolm import COCOLMTokenizer
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
@@ -56,13 +58,16 @@ def get_cpc_texts(config):
     return results
 
 
-def get_max_len(train, cpc_texts, tokenizer):
+def get_max_len(train, cpc_texts, tokenizer, coco=False):
     """Determine max_len."""
     lengths_dict = {}
     lengths = []
     tk0 = tqdm(cpc_texts.values(), total=len(cpc_texts), disable=True)
     for text in tk0:
-        length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
+        if coco:
+            length = len(tokenizer.encode(text, add_special_tokens=False))  # ["input_ids"])
+        else:
+            length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
         lengths.append(length)
     lengths_dict["context_text"] = lengths
 
@@ -70,7 +75,10 @@ def get_max_len(train, cpc_texts, tokenizer):
         lengths = []
         tk0 = tqdm(train[text_col].fillna("").values, total=len(train), disable=True)
         for text in tk0:
-            length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
+            if coco:
+                length = len(tokenizer.encode(text, add_special_tokens=False))  # ["input_ids"])
+            else:
+                length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
             lengths.append(length)
         lengths_dict[text_col] = lengths
 
@@ -86,11 +94,18 @@ def get_pearson_score(y_true, y_pred):
     return score
 
 
-def prepare_input(text, tokenizer, max_len):
+def prepare_input(text, tokenizer, max_len, coco=False):
     """Prepare input for Transformer."""
-    inputs = tokenizer(
-        text, add_special_tokens=True, max_length=max_len, padding="max_length", return_offsets_mapping=False
-    )
+    if coco:
+        inputs_ = tokenizer.encode(text, add_special_tokens=True)
+        padding_length = max_len - len(inputs_)
+        inputs_ = inputs_ + ([tokenizer.pad_token_id] * padding_length)
+        inputs = {}
+        inputs["input_ids"] = inputs_
+    else:
+        inputs = tokenizer(
+            text, add_special_tokens=True, max_length=max_len, padding="max_length", return_offsets_mapping=False
+        )
     for k, v in inputs.items():
         inputs[k] = torch.tensor(v, dtype=torch.long)
     return inputs
@@ -99,17 +114,18 @@ def prepare_input(text, tokenizer, max_len):
 class PhraseSimilarityDataset(Dataset):
     """Dataset."""
 
-    def __init__(self, df, tokenizer, max_len, with_labels=True):
+    def __init__(self, df, tokenizer, max_len, with_labels=True, coco=False):
         self.df = df
         self.tokenizer = tokenizer
         self.max_len = max_len
         self.with_labels = with_labels
+        self.coco = coco
 
     def __len__(self):
         return self.df.shape[0]
 
     def __getitem__(self, index):
-        inputs = prepare_input(self.df.text[index], self.tokenizer, self.max_len)
+        inputs = prepare_input(self.df.text[index], self.tokenizer, self.max_len, coco=self.coco)
         if self.with_labels:
             label = torch.tensor(self.df.score.iloc[index], dtype=torch.float)
             return inputs, label
@@ -169,10 +185,16 @@ class SimpleModel(nn.Module):
     def __init__(self, model_name, hparams):
         super().__init__()
 
-        config = AutoConfig.from_pretrained(model_name)
-        config.num_labels = 1
-        config.hidden_dropout_prob = hparams["fc_dropout"]
-        self.base = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
+        if "coco" in model_name:
+            config = COCOLMConfig.from_pretrained(model_name)
+            config.num_labels = 1
+            config.hidden_dropout_prob = hparams["fc_dropout"]
+            self.base = COCOLMForSequenceClassification.from_pretrained(model_name, config=config)
+        else:
+            config = AutoConfig.from_pretrained(model_name)
+            config.num_labels = 1
+            config.hidden_dropout_prob = hparams["fc_dropout"]
+            self.base = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
 
     def forward(self, inputs):
         base_output = self.base(**inputs)
@@ -430,8 +452,15 @@ if __name__ == "__main__":
     else:
         df["text"] = df["anchor"] + "[SEP]" + df["target"] + "[SEP]" + df["context_text"]
 
-    tokenizer = AutoTokenizer.from_pretrained(config["model"]["base_model_name"])
-    max_len = get_max_len(df, cpc_texts, tokenizer)
+    if "coco" in config["model"]["base_model_name"]:
+        tokenizer = COCOLMTokenizer.from_pretrained(config["model"]["base_model_name"])
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(config["model"]["base_model_name"])
+    if "coco" in config["model"]["base_model_name"]:
+        max_len = get_max_len(df, cpc_texts, tokenizer, coco=True)
+    else:
+        max_len = get_max_len(df, cpc_texts, tokenizer)
+
     config["max_len"] = max_len
     print("max_len:", max_len)
 
@@ -444,8 +473,12 @@ if __name__ == "__main__":
             train_df = df[df["fold"] != fold].reset_index(drop=True)
             valid_df = df[df["fold"] == fold].reset_index(drop=True)
 
-            train_dataset = PhraseSimilarityDataset(train_df, tokenizer, config["max_len"])
-            val_dataset = PhraseSimilarityDataset(valid_df, tokenizer, config["max_len"])
+            if "coco" in config["model"]["base_model_name"]:
+                train_dataset = PhraseSimilarityDataset(train_df, tokenizer, config["max_len"], coco=True)
+                val_dataset = PhraseSimilarityDataset(valid_df, tokenizer, config["max_len"], coco=True)
+            else:
+                train_dataset = PhraseSimilarityDataset(train_df, tokenizer, config["max_len"])
+                val_dataset = PhraseSimilarityDataset(valid_df, tokenizer, config["max_len"])
 
             train_dataloader = DataLoader(
                 train_dataset, batch_size=config["trn_batch_size"], num_workers=config["num_workers"], shuffle=True
