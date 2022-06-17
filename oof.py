@@ -21,6 +21,7 @@ from transformers import (
     AutoModel,
     AutoTokenizer,
     AutoModelForSequenceClassification,
+    AutoModelForTokenClassification,
     get_linear_schedule_with_warmup,
     get_cosine_schedule_with_warmup,
 )
@@ -55,21 +56,6 @@ def get_cpc_texts(config):
             pattern = "^" + pattern[:-2]
             results[context] = cpc_result + ". " + re.sub(pattern, "", result[0])
     return results
-
-
-def get_folds(df, config):
-    """Fold splitting using MultilabelStratifiedKFold."""
-    dfx = pd.get_dummies(df, columns=["score"]).groupby(["anchor"], as_index=False).sum()
-    cols = [c for c in dfx.columns if c.startswith("score_") or c == "anchor"]
-    dfx = dfx[cols]
-    mskf = MultilabelStratifiedKFold(n_splits=config["n_fold"], shuffle=True, random_state=config["fold_seed"])
-    labels = [c for c in dfx.columns if c != "anchor"]
-    dfx_labels = dfx[labels]
-    dfx["fold"] = -1
-    for fold, (trn_, val_) in enumerate(mskf.split(dfx, dfx_labels)):
-        dfx.loc[val_, "fold"] = fold
-    df = df.merge(dfx[["anchor", "fold"]], on="anchor", how="left")
-    return df
 
 
 def get_max_len(train, cpc_texts, tokenizer):
@@ -195,6 +181,68 @@ class SimpleModel(nn.Module):
         return base_output[0]
 
 
+class MDropModel(nn.Module):
+    def __init__(self, model_name, hparams):
+        super().__init__()
+
+        config = AutoConfig.from_pretrained(model_name)
+        config.output_hidden_states = True
+        self.base = AutoModel.from_pretrained(model_name, config=config)
+        dim = config.hidden_size
+        self.dropout_0 = nn.Dropout(p=0)
+        self.dropout_1 = nn.Dropout(p=0.1)
+        self.dropout_2 = nn.Dropout(p=0.2)
+        self.dropout_3 = nn.Dropout(p=0.3)
+        self.dropout_4 = nn.Dropout(p=0.4)
+        self.cls = nn.Linear(dim, 1)
+
+    def forward(self, inputs):
+        base_output = self.base(**inputs)
+        output = base_output.hidden_states[-1]
+        output_0 = self.cls(self.dropout_0(torch.mean(output, dim=1)))
+        output_1 = self.cls(self.dropout_1(torch.mean(output, dim=1)))
+        output_2 = self.cls(self.dropout_2(torch.mean(output, dim=1)))
+        output_3 = self.cls(self.dropout_3(torch.mean(output, dim=1)))
+        output_4 = self.cls(self.dropout_4(torch.mean(output, dim=1)))
+        output = torch.mean(torch.stack([output_0, output_1, output_2, output_3, output_4], dim=0), dim=0)
+        return output
+
+
+class MeanPooling(nn.Module):
+    def __init__(self):
+        super(MeanPooling, self).__init__()
+
+    def forward(self, last_hidden_state, attention_mask):
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
+        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
+        sum_mask = input_mask_expanded.sum(1)
+        sum_mask = torch.clamp(sum_mask, min=1e-9)
+        mean_embeddings = sum_embeddings / sum_mask
+        return mean_embeddings
+
+
+class MeanPoolingModel(nn.Module):
+    def __init__(self, model_name, hparams):
+        super().__init__()
+
+        config = AutoConfig.from_pretrained(model_name)
+        self.base = AutoModel.from_pretrained(model_name, config=config)
+        self.drop = nn.Dropout(p=hparams["fc_dropout"])
+        self.pooler = MeanPooling()
+        self.fc = nn.Linear(config.hidden_size, 1)
+
+    def forward(self, inputs):
+        # base_output = self.base(**inputs)
+        # return base_output[0]
+        out = self.base(
+            input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], output_hidden_states=False
+        )
+        out = self.pooler(out.last_hidden_state, inputs["attention_mask"])
+        out = self.drop(out)
+        outputs = self.fc(out)
+        return outputs
+
+
 class PearsonLoss(nn.Module):
     def __init__(self):
         super().__init__()
@@ -210,7 +258,7 @@ class PearsonLoss(nn.Module):
 
 loss_dict = {
     "BCEWithLogitsLoss": nn.BCEWithLogitsLoss(),
-    "MSELoss": nn.MSELoss(),
+    "MSLELoss": nn.MSELoss(),
     "PearsonLoss": PearsonLoss(),
 }
 
@@ -230,10 +278,14 @@ class PhraseSimilarityModel(pl.LightningModule):
             self.model = NakamaModel(self.hparams.base_model_name, self.hparams.model_hparams)
         elif self.hparams.model_name == "SimpleModel":
             self.model = SimpleModel(self.hparams.base_model_name, self.hparams.model_hparams)
+        elif self.hparams.model_name == "MDropModel":
+            self.model = MDropModel(self.hparams.base_model_name, self.hparams.model_hparams)
+        elif self.hparams.model_name == "MeanPoolingModel":
+            self.model = MeanPoolingModel(self.hparams.base_model_name, self.hparams.model_hparams)
         else:
             assert False, f'Unknown model_name: "{self.hparams.model_name}"'
         # Create loss
-        self.loss = loss_dict[self.hparams.loss_name]
+        # self.loss = loss_dict[self.hparams.loss_name]
 
     def forward(self, text, mask):
         """Forward."""
@@ -318,8 +370,6 @@ if __name__ == "__main__":
         df["text"] = df["anchor"] + "[SEP]" + df["target"] + "[SEP]" + df["context_text"].apply(str.lower)
     else:
         df["text"] = df["anchor"] + "[SEP]" + df["target"] + "[SEP]" + df["context_text"]
-
-    #df = get_folds(df, config)
 
     tokenizer = AutoTokenizer.from_pretrained(config["model"]["base_model_name"])
     max_len = get_max_len(df, cpc_texts, tokenizer)

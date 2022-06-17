@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Training script for U.S. Patent Phrase to Phrase Matching."""
+"""Prediction script for U.S. Patent Phrase to Phrase Matching."""
 
 import os
 import re
 import glob
+import gc
+import scipy
 
 import numpy as np
 import pandas as pd
@@ -11,35 +13,30 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import yaml
-from scipy.stats import pearsonr
 from torch.utils.data import DataLoader, Dataset
 from transformers import (
     AutoConfig,
     AutoModel,
     AutoTokenizer,
-    get_linear_schedule_with_warmup,
     AutoModelForSequenceClassification,
+    get_linear_schedule_with_warmup,
 )
+from scipy.stats import trim_mean
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 
 def get_cpc_texts(config):
-    """
-    Fix as provided by Nicholas Broad.
-
-    https://www.kaggle.com/competitions/us-patent-phrase-to-phrase-matching/discussion/324928#1790476
-    """
     contexts = []
     pattern = "[A-Z]\d+"
-    for file_name in os.listdir(config["input_dir"] + "cpc-data/CPCSchemeXML202105"):
+    for file_name in os.listdir("../input/uspppm-tools/cpc-data/CPCSchemeXML202105"):
         result = re.findall(pattern, file_name)
         if result:
             contexts.append(result)
     contexts = sorted(set(sum(contexts, [])))
     results = {}
     for cpc in ["A", "B", "C", "D", "E", "F", "G", "H", "Y"]:
-        with open(config["input_dir"] + f"cpc-data/CPCTitleList202202/cpc-section-{cpc}_20220201.txt") as f:
+        with open("../input/uspppm-tools/" + f"cpc-data/CPCTitleList202202/cpc-section-{cpc}_20220201.txt") as f:
             s = f.read()
         pattern = f"{cpc}\t\t.+"
         result = re.findall(pattern, s)
@@ -51,12 +48,6 @@ def get_cpc_texts(config):
             pattern = "^" + pattern[:-2]
             results[context] = cpc_result + ". " + re.sub(pattern, "", result[0])
     return results
-
-
-def get_pearson_score(y_true, y_pred):
-    """Calculate Pearson correlation."""
-    score = pearsonr(y_true, y_pred)[0]
-    return score
 
 
 def prepare_input(text, tokenizer, max_len):
@@ -98,7 +89,7 @@ class NakamaModel(nn.Module):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_name, output_hidden_states=True)
 
-        self.model = AutoModel.from_pretrained(model_name, config=self.config)
+        self.model = AutoModel.from_config(config=self.config)
 
         self.attention = nn.Sequential(
             nn.Linear(self.config.hidden_size, hparams["att_hidden_size"]),
@@ -144,43 +135,12 @@ class SimpleModel(nn.Module):
 
         config = AutoConfig.from_pretrained(model_name)
         config.num_labels = 1
-        config.hidden_dropout_prob = hparams["fc_dropout"]
-        self.base = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
+        self.base = AutoModelForSequenceClassification.from_config(config=config)
 
     def forward(self, inputs):
         base_output = self.base(**inputs)
+
         return base_output[0]
-
-
-class AbhishekModel(nn.Module):
-    def __init__(self, model_name, hparams):
-        super().__init__()
-        self.model_name = model_name
-
-        config = AutoConfig.from_pretrained(model_name)
-        config.update(
-            {
-                "output_hidden_states": True,
-                "add_pooling_layer": True,
-                "num_labels": 1,
-            }
-        )
-        self.transformer = AutoModel.from_pretrained(model_name, config=config)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.output = nn.Linear(config.hidden_size, 1)
-
-    def forward(self, inputs):
-        transformer_out = self.transformer(**inputs)
-        output = transformer_out.pooler_output
-        output = self.dropout(output)
-        output = self.output(output)
-        return output
-
-
-loss_dict = {
-    "BCEWithLogitsLoss": nn.BCEWithLogitsLoss(),
-    "MSELoss": nn.MSELoss(),
-}
 
 
 class PhraseSimilarityModel(pl.LightningModule):
@@ -198,68 +158,12 @@ class PhraseSimilarityModel(pl.LightningModule):
             self.model = NakamaModel(self.hparams.base_model_name, self.hparams.model_hparams)
         elif self.hparams.model_name == "SimpleModel":
             self.model = SimpleModel(self.hparams.base_model_name, self.hparams.model_hparams)
-        elif self.hparams.model_name == "AbhishekModel":
-            self.model = AbhishekModel(self.hparams.base_model_name, self.hparams.model_hparams)
         else:
             assert False, f'Unknown model_name: "{self.hparams.model_name}"'
-        # Create loss
-        self.loss = loss_dict[self.hparams.loss_name]
 
     def forward(self, text, mask):
         """Forward."""
         return self.model(text, mask)
-
-    def configure_optimizers(self):
-        """Configure optimizer and scheduler."""
-        if self.hparams.optimizer_name == "AdamW":
-            self.optimizer = torch.optim.AdamW(self.model.parameters(), **self.hparams.optimizer_hparams)
-        else:
-            assert False, f'Unknown optimizer: "{self.hparams.optimizer_name}"'
-
-        # total_steps = len(self.trainer._data_connector._train_dataloader_source.dataloader()) * self.trainer.max_epochs
-        total_steps = len(self.train_dataloader()) * self.trainer.max_epochs
-        if self.hparams.scheduler_name == "linear_schedule_with_warmup":
-            self.scheduler = get_linear_schedule_with_warmup(
-                optimizer=self.optimizer,
-                num_warmup_steps=0,
-                num_training_steps=total_steps,
-            )
-        else:
-            assert False, f'Unknown scheduler: "{self.hparams.scheduler_name}"'
-
-        lr_scheduler_dict = {"scheduler": self.scheduler, "interval": "step"}
-        return {"optimizer": self.optimizer, "lr_scheduler": lr_scheduler_dict}
-
-    def training_step(self, batch, batch_idx):
-        """Training."""
-        inputs, labels = batch[0], batch[1]
-        preds = self.model(inputs)
-        loss = self.loss(preds.squeeze(1), labels)
-        self.log("trn_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        for param_group in self.trainer.optimizers[0].param_groups:
-            lr = param_group["lr"]
-        self.log("lr", lr, on_step=True, on_epoch=False, prog_bar=True)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        """Calculate validation scores/metrics."""
-        inputs, labels = batch[0], batch[1]
-        preds = self.model(inputs)
-        loss = self.loss(preds.squeeze(1), labels)
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        return {"preds": preds.squeeze(dim=-1), "labels": batch[1].squeeze(dim=-1)}
-
-    def validation_epoch_end(self, outs):
-        """Calculate Pearson score at the end of validation."""
-        preds = []
-        labels = []
-        for out in outs:
-            preds.append(out["preds"])
-            labels.append(out["labels"])
-        preds = torch.cat(preds).cpu().numpy().flatten()
-        labels = torch.cat(labels).cpu().numpy().flatten()
-        score = get_pearson_score(labels, preds)
-        self.log("val_score", score, on_epoch=True, prog_bar=True)
 
     def predict_step(self, batch, batch_idx):
         """Prediction."""
@@ -267,34 +171,9 @@ class PhraseSimilarityModel(pl.LightningModule):
         return preds
 
 
-if __name__ == "__main__":
-    with open("ckpt/config.yaml", "r") as file_obj:
-        config = yaml.safe_load(file_obj)
-    config["input_dir"] = "/home/egortrushin/datasets/us-patent-phrase-to-phrase-matching/"
-    config["model"]["base_model_name"] = "microsoft/deberta-v3-large"
-    config["max_len"] = 133
-    config["num_workers"] = 1
-    config["val_batch_size"] = 32
-
-    df = pd.read_csv(config["input_dir"] + "test.csv")
-    cpc_texts = get_cpc_texts(config)
-    torch.save(cpc_texts, config["output_dir"] + "cpc_texts.pth")
-    df["context_text"] = df["context"].map(cpc_texts)
-    if config["context_text_lower"]:
-        df["text"] = df["anchor"] + "[SEP]" + df["target"] + "[SEP]" + df["context_text"].apply(str.lower)
-    else:
-        df["text"] = df["anchor"] + "[SEP]" + df["target"] + "[SEP]" + df["context_text"]
-
-    tokenizer = AutoTokenizer.from_pretrained(config["model"]["base_model_name"])
-
-    predict_dataset = PhraseSimilarityDataset(df, tokenizer, config["max_len"], with_labels=False)
-
-    predict_dataloader = DataLoader(
-        predict_dataset, batch_size=config["val_batch_size"], num_workers=config["num_workers"], shuffle=False
-    )
-
+def make_predictions(ckpt_dir, config, predict_dataloader, l_mean=True):
     all_predictions = []
-    for model in glob.glob("ckpt/*.ckpt"):
+    for model in glob.glob(ckpt_dir + "/*.ckpt"):
 
         trainer = pl.Trainer(
             gpus=-1 if torch.cuda.is_available() else 0,
@@ -310,9 +189,111 @@ if __name__ == "__main__":
         for batch in predictions:
             preds += batch.squeeze(1).tolist()
 
-        all_predictions.append(preds)
+        np_preds = np.array(preds)
+        scaled_preds = (np_preds - np_preds.min()) / (np_preds.max() - np_preds.min())
+        all_predictions.append(scaled_preds)
 
-    final_predictions = np.array(all_predictions).mean(axis=1)
+        del driver, trainer
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    if l_mean:
+        final_predictions = np.array(all_predictions).mean(axis=0)
+    else:
+        final_predictions = np.array(all_predictions)
+    return final_predictions
+
+
+def postprocess(inputs, axis=0, spread_lim=0.1, proportiontocut=0.175, verb=True):
+    """When spead of provided predictions is smaller than spread_lim, use usual mean,
+    when spead of provided predictions is larger than spread_lim, use trimmed mean
+    with provided proportiontocut."""
+    spread = inputs.max(axis=axis) - inputs.min(axis=axis)
+    return np.where(
+        spread < spread_lim, np.mean(inputs, axis=axis), scipy.stats.trim_mean(inputs, proportiontocut, axis=axis)
+    )
+
+
+input = ("/home/egortrushin/GitHub/USPPPM_models",)  # "../input/"
+tools = "../input/uspppm-tools/"
+models = {
+    "deberta-v3-large SimpleModel PearsonLoss": {
+        "path": input + "deberta-v3-large-08357",
+        "path2": tools + "deberta-v3-large",
+        "max_len": 133,
+    },  # LB=0.8398
+    "deberta-v3-large NakamaModel PearsonLoss": {
+        "path": input + "deberta-v3-large-08346",
+        "path2": tools + "deberta-v3-large",
+        "max_len": 133,
+    },  # LB=0.8393
+    "bert_for_patents SimpleModel PearsonLoss": {
+        "path": input + "bert-for-patents-08232",
+        "path2": tools + "bert-for-patents",
+        "max_len": 115,
+    },  # LB=0.8365
+    "bert_for_patents NakamaModel PearsonLoss": {
+        "path": input + "bert-for-patents-08258",
+        "path2": tools + "bert-for-patents",
+        "max_len": 115,
+    },
+    "albert_xxlarge_v2 SimpleModel PearsonLoss": {
+        "path": input + "albert-xxlarge-v2-08167",
+        "path2": tools + "albert-xxlarge-v2",
+        "max_len": 124,
+    },
+    "electra_large SimpleModel PearsonLoss": {
+        "path": input + "electra-large-08297",
+        "path2": tools + "electra-large",
+        "max_len": 122,
+    },
+    "electra_large SimpleModel MSELoss": {
+        "path": input + "electra-large-08285",
+        "path2": tools + "electra-large",
+        "max_len": 122,
+    },
+    "funnel_xlarge SimpleModel PearsonLoss": {
+        "path": input + "funnel-xlarge-08275",
+        "path2": tools + "funnel-xlarge",
+        "max_len": 122,
+    },
+    "BioM-ELECTRA-Large SimpleModel PearsonLoss": {
+        "path": input + "biom-electra-large-discriminator-08142",
+        "path2": tools + "BioM-ELECTRA-Large-Discriminator",
+        "max_len": 108,
+    },
+    # "funnel_large SimpleModel PearsonLoss": {
+    #     "path": input + "funnel-large-08213",
+    #     "path2": tools + "funnel-large",
+    #     "max_len": 122,
+    # },
+    # "funnel_xlarge_base SimpleModel PearsonLoss": {
+    #     "path": input + "funnel-xlarge-base-08285",
+    #     "path2": tools + "funnel-xlarge-base",
+    #     "max_len": 122,
+    # },
+    # "deberta-v3-large SimpleModel PearsonLoss Pseudo-Labelling": {
+    #     "path": input + "deberta-v3-large-08380",
+    #     "path2": tools + "deberta-v3-large",
+    #     "max_len": 133,
+    # },  # LB=0.8406
+}
+
+all_predictions = list()
+for model in models:
+    print(model)
+    ckpt_dir = models[model]["path"]
+    with open(ckpt_dir + "/config.yaml", "r") as file_obj:
+        config = yaml.safe_load(file_obj)
+    config["input_dir"] = "../input/us-patent-phrase-to-phrase-matching/"
+    config["model"]["base_model_name"] = models[model]["path2"]
+    config["max_len"] = models[model]["max_len"]
+    config["num_workers"] = 1
+    config["val_batch_size"] = 64
+
+    predict_dataloader = get_dataloader(config)
+    predictions = make_predictions(ckpt_dir, config, predict_dataloader, l_mean=False)
+    all_predictions.append(predictions)
 
     submission_csv = pd.read_csv(config["input_dir"] + "sample_submission.csv")
     submission_csv["score"] = final_predictions
